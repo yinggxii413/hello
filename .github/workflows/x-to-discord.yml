@@ -24,10 +24,6 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run monitor
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          RSS_URL: ${{ secrets.RSS_URL }}
-        run: python monitor.py
+    
 
     
