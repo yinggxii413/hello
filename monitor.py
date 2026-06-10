@@ -66,20 +66,23 @@ def send_to_discord(tweet):
     original_text = tweet["text"]
     chinese_text = translate_to_chinese(original_text)
 
-    content = f"""🚨 Serenity 新推文
-
-【原文】
-{original_text}
-
-【中文翻译】
-{chinese_text}
-
-🔗 {tweet_url}
-"""
+    payload = {
+        "embeds": [
+            {
+                "title": "🚨 Serenity 新推文",
+                "url": tweet_url,
+                "description": f"**【原文】**\n{original_text}\n\n**【中文翻译】**\n{chinese_text}",
+                "color": 3447003,
+                "footer": {
+                    "text": f"来源：@{X_USERNAME}"
+                }
+            }
+        ]
+    }
 
     requests.post(
         DISCORD_WEBHOOK,
-        json={"content": content}
+        json=payload
     ).raise_for_status()
 
 def main():
