@@ -59,7 +59,7 @@ def get_latest_posts(user_id):
     params = {
         "max_results": 5,
         "tweet.fields": "created_at",
-        "exclude": "replies,retweets"
+        "exclude": "replies,retweets",
     }
 
     r = requests.get(url, headers=headers, params=params)
@@ -75,13 +75,13 @@ def translate_to_chinese(text):
             messages=[
                 {
                     "role": "system",
-                    "content": "你是专业财经翻译助手，请翻译成自然流畅中文。"
+                    "content": "你是专业财经翻译助手，请翻译成自然流畅中文。保留股票代码、公司名、人名和关键术语。不要添加原文没有的信息。",
                 },
                 {
                     "role": "user",
-                    "content": text
-                }
-            ]
+                    "content": text,
+                },
+            ],
         )
 
         return response.choices[0].message.content.strip()
@@ -91,10 +91,11 @@ def translate_to_chinese(text):
 
 
 def send_to_discord(account, tweet):
+    if not account["webhook"]:
+        print(f"Missing webhook for {account['username']}")
+        return
 
-    tweet_url = (
-        f"https://x.com/{account['username']}/status/{tweet['id']}"
-    )
+    tweet_url = f"https://x.com/{account['username']}/status/{tweet['id']}"
 
     original_text = tweet["text"]
     chinese_text = translate_to_chinese(original_text)
@@ -104,26 +105,25 @@ def send_to_discord(account, tweet):
             {
                 "title": f"📰 {account['display_name']} 新推文",
                 "url": tweet_url,
-                "description":
+                "description": (
                     f"**原文**\n{original_text}\n\n"
-                    f"**中文翻译**\n{chinese_text}",
-                "color": 3447003
+                    f"**中文翻译**\n{chinese_text}"
+                ),
+                "color": 3447003,
+                "footer": {
+                    "text": f"来源：@{account['username']}"
+                },
             }
         ]
     }
 
-    requests.post(
-        account["webhook"],
-        json=payload
-    ).raise_for_status()
+    requests.post(account["webhook"], json=payload).raise_for_status()
 
 
 def process_account(account, state):
-
     username = account["username"]
 
     user_id = get_user_id(username)
-
     posts = get_latest_posts(user_id)
 
     if not posts:
@@ -131,20 +131,16 @@ def process_account(account, state):
         return
 
     last_id = state.get(username)
-
     newest_id = posts[0]["id"]
 
     if last_id is None:
         state[username] = newest_id
-        print(
-            f"Initialized state for {username}. No message sent."
-        )
+        print(f"Initialized state for {username}. No message sent.")
         return
 
     new_posts = []
 
     for post in posts:
-
         if post["id"] == last_id:
             break
 
@@ -155,25 +151,10 @@ def process_account(account, state):
 
     state[username] = newest_id
 
-    print(
-        f"Sent {len(new_posts)} new post(s) for {username}"
-    )
+    print(f"Sent {len(new_posts)} new post(s) for {username}")
 
 
 def main():
-
-    requests.post(
-        os.environ["FINANCIAL_JUICE_WEBHOOK"],
-        json={"content": "🔥 GitHub 到 Discord 测试成功"}
-    )
-
-    state = load_state()
-
-    for account in ACCOUNTS:
-        process_account(account, state)
-
-    save_state(state)
-
     state = load_state()
 
     for account in ACCOUNTS:
