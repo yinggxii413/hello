@@ -24,10 +24,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-     - name: Run monitor
-  env:
-    X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
-    DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-    X_USERNAME: ${{ secrets.X_USERNAME }}
-    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-  run: python monitor.py
+      - name: Run monitor
+        env:
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          X_USERNAME: ${{ secrets.X_USERNAME }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: python monitor.py
