@@ -12,6 +12,7 @@ jobs:
 run:
 runs-on: ubuntu-latest
 
+```
 steps:
   - uses: actions/checkout@v4
 
@@ -37,3 +38,4 @@ steps:
       git add state.json
       git commit -m "update state" || echo "No changes"
       git push
+```
