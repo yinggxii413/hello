@@ -26,9 +26,8 @@ jobs:
 
       - name: Run monitor
         env:
-          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          X_USERNAME: ${{ secrets.X_USERNAME }}
+          RSS_URL: ${{ secrets.RSS_URL }}
         run: python monitor.py
 
       - name: Save state
