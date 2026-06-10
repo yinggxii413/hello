@@ -27,7 +27,8 @@ jobs:
       - name: Run monitor
         env:
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          X_USERNAME: ${{ secrets.X_USERNAME }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          TRUMP_WEBHOOK: ${{ secrets.TRUMP_WEBHOOK }}
+          FINANCIAL_JUICE_WEBHOOK: ${{ secrets.FINANCIAL_JUICE_WEBHOOK }}
         run: python monitor.py
