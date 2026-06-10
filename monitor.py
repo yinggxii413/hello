@@ -59,7 +59,6 @@ def get_latest_posts(user_id):
     params = {
         "max_results": 10,
         "tweet.fields": "created_at",
-        "exclude": "replies,retweets",
     }
 
     r = requests.get(url, headers=headers, params=params)
