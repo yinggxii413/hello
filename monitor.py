@@ -162,6 +162,18 @@ def process_account(account, state):
 
 def main():
 
+    requests.post(
+        os.environ["FINANCIAL_JUICE_WEBHOOK"],
+        json={"content": "🔥 GitHub 到 Discord 测试成功"}
+    )
+
+    state = load_state()
+
+    for account in ACCOUNTS:
+        process_account(account, state)
+
+    save_state(state)
+
     state = load_state()
 
     for account in ACCOUNTS:
