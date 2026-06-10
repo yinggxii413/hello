@@ -30,10 +30,4 @@ jobs:
           RSS_URL: ${{ secrets.RSS_URL }}
         run: python monitor.py
 
-      - name: Save state
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add state.json || true
-          git commit -m "Update state" || echo "No changes"
-          git push
+    
