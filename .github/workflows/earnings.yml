@@ -2,9 +2,9 @@ name: Earnings Monitor
 
 on:
   schedule:
-    - cron: "30 12 * * *"
-    - cron: "30 20 * * *"
-    - cron: "30 22 * * *"
+    - cron: "30 12 * * *"   # UTC 12:30 = 北京 20:30 (覆盖美股盘前)
+    - cron: "30 20 * * *"   # UTC 20:30 = 北京 04:30 (覆盖美股盘后)
+    - cron: "30 22 * * *"   # UTC 22:30 = 北京 06:30 (覆盖美股盘后晚批)
   workflow_dispatch:
 
 permissions:
@@ -28,6 +28,8 @@ jobs:
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EARNINGS_WEBHOOK: ${{ secrets.EARNINGS_WEBHOOK }}
+          # ↓↓↓ 测试用：回看30天，能立刻抓到近一个月已发财报的票。看完效果请删掉这一行(恢复默认只看最近3天)
+          REPORTED_LOOKBACK: "30"
         run: python earnings_monitor.py
 
       - name: Save earnings state
