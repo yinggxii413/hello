@@ -1,21 +1,30 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-财报实际结果 -> 中文数据分析 -> Discord  (v1：仅免费财报硬数据)
-================================================================
+财报实际结果 -> 中文数据分析 -> 按板块分发到 9 个 Discord 频道  (v2)
+====================================================================
 在 GitHub Actions 上每日多次运行(见 earnings.yml 的 cron)。
-检测观察清单内"已经披露财报"的公司，抓实际营收/EPS(vs 预期)+关键指标，
+检测观察清单(9 类 71 只)内"已经披露财报"的公司，抓实际营收/EPS(vs 预期)+关键指标，
 用 OpenAI 生成中文财报数据分析(Discord 友好排版，不用 Markdown 表格)，
-分段发到 Discord。用 earnings_state.json 去重。
-本版【不含】电话会与 X 情绪分析，待效果验证后再加。
+**按公司所属板块，分发到对应板块的 Discord 频道**。用 earnings_state.json 去重。
+本版只做财报硬数据；电话会与市场/X 分析待后续加。
 
-环境变量(GitHub repo Secrets)：
-  FINNHUB_API_KEY   必填
-  OPENAI_API_KEY    必填
-  EARNINGS_WEBHOOK  必填  Discord Webhook URL
+必填环境变量(GitHub repo Secrets)：
+  FINNHUB_API_KEY
+  OPENAI_API_KEY
+  9 个频道 Webhook(缺哪个，该板块就跳过并告警，不影响其他)：
+    WEBHOOK_EQUIP      封装设备
+    WEBHOOK_STORAGE    存储
+    WEBHOOK_COMPUTE    算力芯片
+    WEBHOOK_OPTICAL    光模块
+    WEBHOOK_NEOCLOUD   Neocloud
+    WEBHOOK_MAG7       Mag 7
+    WEBHOOK_SPACE      航天机器人
+    WEBHOOK_ENERGY     储能
+    WEBHOOK_QUANTUM    量子
 可选：
-  OPENAI_MODEL      默认 gpt-4o-mini(想更深度可设 gpt-4o)
-  MODE              post(默认,盘后实际) | preview(财报前瞻) | both
+  OPENAI_MODEL      默认 gpt-4o-mini
+  MODE              post(默认) | preview | both
   REPORTED_LOOKBACK 盘后回看天数，默认 3(测试可临时设 30)
   PREVIEW_AHEAD     前瞻向前看天数，默认 7
 """
@@ -29,7 +38,6 @@ from openai import OpenAI
 
 FINNHUB_API_KEY = os.environ["FINNHUB_API_KEY"]
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
-EARNINGS_WEBHOOK = os.environ["EARNINGS_WEBHOOK"]
 
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini").strip()
 MODE = os.environ.get("MODE", "post").strip().lower()
@@ -42,31 +50,34 @@ HTTP_TIMEOUT = 30
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# ---------------- 观察清单：6 大类 ----------------
-WATCHLIST_GROUPS = {
-    "芯片设计·算力·CPU·内存": [
-        "NVDA", "AVGO", "MRVL", "ARM", "ALAB", "CRDO", "INTC", "QCOM", "AMD",
-        "MU", "SNDK", "WDC", "STX", "000660.KS", "005930.KS",
-    ],
-    "半导体设备·代工·封测": [
-        "ASML", "AMAT", "KLAC", "ONTO", "TSM", "AMKR", "FN",
-    ],
-    "光通信·功率·化合物半导体": [
-        "AAOI", "LITE", "COHR", "SIVEF", "WOLF", "NVTS", "VSH", "AXTI",
-    ],
-    "大型科技·AI云·数据中心": [
-        "AAPL", "META", "GOOG", "GOOGL", "AMZN", "MSFT", "TSLA",
-        "CRWV", "NBIS", "IREN", "SMCI", "ANET", "VRT", "ETN",
-    ],
-    "储能·清洁能源": [
-        "FLNC", "EOSE", "GWH", "STEM", "FCEL",
-    ],
-    "加密·金融科技·航天·其他": [
-        "COIN", "HOOD", "CRCL", "IBIT", "RKLB", "SPCX", "ASTS", "NOK", "KORU",
-    ],
-}
-CATEGORY_BY_TICKER = {t: cat for cat, lst in WATCHLIST_GROUPS.items() for t in lst}
+# ---------------- 9 大类(产业链上游->下游) ----------------
+# 每类: 显示名、对应频道的 webhook 环境变量名、成分股
+CATEGORIES = [
+    {"name": "封装设备", "env": "WEBHOOK_EQUIP",
+     "tickers": ["AMAT", "ONTO", "KLAC", "CAMT", "FORM", "AMKR", "AEHR", "ASML"]},
+    {"name": "存储", "env": "WEBHOOK_STORAGE",
+     "tickers": ["MU", "SNDK", "KIOXIA", "STX", "WDC", "005930.KS", "000660.KS"]},
+    {"name": "算力芯片", "env": "WEBHOOK_COMPUTE",
+     "tickers": ["TSM", "AVGO", "AMD", "ARM", "NOK", "INTC", "MRVL", "QCOM", "ALAB", "VSH"]},
+    {"name": "光模块", "env": "WEBHOOK_OPTICAL",
+     "tickers": ["POET", "COHR", "CRDO", "AAOI", "AXTI", "LITE", "FOTO", "SIVEF", "FN"]},
+    {"name": "Neocloud", "env": "WEBHOOK_NEOCLOUD",
+     "tickers": ["IREN", "NBIS", "HUT", "ORCL", "WULF", "NVTS", "CRWV"]},
+    {"name": "Mag 7", "env": "WEBHOOK_MAG7",
+     "tickers": ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA"]},
+    {"name": "航天机器人", "env": "WEBHOOK_SPACE",
+     "tickers": ["DXYZ", "SATS", "RKLB", "ASTS", "FLY", "LUNR", "PATH", "SIDE", "RR", "SPCE", "SPCX"]},
+    {"name": "储能", "env": "WEBHOOK_ENERGY",
+     "tickers": ["BE", "CEG", "ENPH", "NEE", "FLNC", "CSIQ", "EOSE"]},
+    {"name": "量子", "env": "WEBHOOK_QUANTUM",
+     "tickers": ["IONQ", "QUBT", "QBTS", "LAES", "QTUM"]},
+]
+
+CATEGORY_BY_TICKER = {t: c["name"] for c in CATEGORIES for t in c["tickers"]}
+ENV_BY_CATEGORY = {c["name"]: c["env"] for c in CATEGORIES}
 WATCHLIST = set(CATEGORY_BY_TICKER.keys())
+# 启动时读取各频道 webhook(缺失为空字符串)
+WEBHOOK_BY_CATEGORY = {c["name"]: os.environ.get(c["env"], "").strip() for c in CATEGORIES}
 
 
 # ---------------- 状态(去重) ----------------
@@ -111,7 +122,6 @@ def fetch_calendar(from_day, to_day):
 
 
 def is_reported(item):
-    """财报是否已实际披露：有 epsActual 或 revenueActual。"""
     return item.get("epsActual") is not None or item.get("revenueActual") is not None
 
 
@@ -133,8 +143,8 @@ SYS_POST = """你是专业的美股财报分析师。基于给定的【已披露
 **财报实际结果**
 
 **一、财报重点数据**
-📈 **实际营收**：$X亿　（预期 $Y亿 → 超预期✅ +N% / 不及❌ -N%）
-💰 **实际 EPS**：$X　（预期 $Y → 超预期✅ +N% / 不及❌ -N%）
+📈 **实际营收**：$X亿（预期 $Y亿 → 超预期✅ +N% / 不及❌ -N%）
+💰 **实际 EPS**：$X（预期 $Y → 超预期✅ +N% / 不及❌ -N%）
 **毛利率**：X%　|　**净利率**：X%
 **营收同比(TTM)**：X%　|　**PE**：X
 **市值**：$X亿　|　**52周区间**：$低 ~ $高
@@ -201,8 +211,10 @@ def _chat(system, user):
         return None
 
 
-# ---------------- Discord(分段发送，修复截断) ----------------
-def discord_send(text):
+# ---------------- Discord(指定频道，分段发送) ----------------
+def discord_send(webhook, text):
+    if not webhook:
+        return False
     chunks, buf = [], ""
     for line in text.split("\n"):
         while len(line) > 1900:
@@ -216,14 +228,16 @@ def discord_send(text):
     if buf:
         chunks.append(buf)
 
+    ok = True
     for ch in chunks:
+        sent = False
         for _ in range(3):
             try:
-                r = requests.post(EARNINGS_WEBHOOK, json={"content": ch}, timeout=HTTP_TIMEOUT)
+                r = requests.post(webhook, json={"content": ch}, timeout=HTTP_TIMEOUT)
             except Exception as e:
                 print(f"[WARN] Discord 异常: {e}"); time.sleep(2); continue
             if r.status_code in (200, 204):
-                break
+                sent = True; break
             if r.status_code == 429:
                 wait = 1.5
                 try:
@@ -232,7 +246,9 @@ def discord_send(text):
                     pass
                 time.sleep(wait + 0.3); continue
             print(f"[WARN] Discord HTTP {r.status_code}: {r.text[:140]}"); break
+        ok = ok and sent
         time.sleep(0.8)
+    return ok
 
 
 # ---------------- 主流程 ----------------
@@ -240,35 +256,42 @@ def run_post(state):
     today = date.today()
     frm = today - timedelta(days=REPORTED_LOOKBACK)
     cal = fetch_calendar(frm, today)
-    reported = [it for it in cal
-                if it.get("symbol") in WATCHLIST and is_reported(it)]
+    reported = [it for it in cal if it.get("symbol") in WATCHLIST and is_reported(it)]
     print(f"[INFO] 盘后模式：窗口 {frm}~{today}，清单内已披露 {len(reported)} 家")
 
-    new_items = []
+    # 按板块分组新增项
+    by_cat = {}
     for it in reported:
         key = f"post-{it.get('symbol')}-{it.get('year')}Q{it.get('quarter')}"
-        if not state.get(key):
-            new_items.append((key, it))
+        if state.get(key):
+            continue
+        cat = CATEGORY_BY_TICKER.get(it.get("symbol"))
+        by_cat.setdefault(cat, []).append((key, it))
 
-    if not new_items:
+    if not by_cat:
         print("[INFO] 无新披露财报，跳过。")
         return
 
-    syms = ", ".join("`" + k.split("-")[1] + "`" for k, _ in new_items)
-    discord_send(f"🔔 **财报实际结果 · {today.isoformat()}**\n清单内 **{len(new_items)}** 家已披露：{syms}")
-
-    for key, it in new_items:
-        sym = it.get("symbol")
-        print(f"[INFO] 处理 {sym} ...")
-        metrics = fetch_metrics(sym)
-        report = gen_post_report(it, metrics)
-        if not report:
-            discord_send(f"⚠️ `{sym}` 报告生成失败，已跳过。")
+    for cat, items in by_cat.items():
+        webhook = WEBHOOK_BY_CATEGORY.get(cat, "")
+        syms = [it.get("symbol") for _, it in items]
+        if not webhook:
+            print(f"[WARN] 板块「{cat}」未配置 webhook({ENV_BY_CATEGORY.get(cat)})，跳过 {syms}(state 不记，待配置后补发)")
             continue
-        discord_send(report)
-        state[key] = True
-        save_state(state)   # 逐个落盘，避免中途失败丢状态
-        time.sleep(1)
+        print(f"[INFO] 板块「{cat}」→ {len(items)} 家：{syms}")
+        discord_send(webhook, f"🔔 **{cat} · 财报实际结果 · {today.isoformat()}**\n"
+                              f"本板块 **{len(items)}** 家已披露：{', '.join('`'+s+'`' for s in syms)}")
+        for key, it in items:
+            sym = it.get("symbol")
+            metrics = fetch_metrics(sym)
+            report = gen_post_report(it, metrics)
+            if not report:
+                discord_send(webhook, f"⚠️ `{sym}` 报告生成失败，已跳过。")
+                continue
+            discord_send(webhook, report)
+            state[key] = True
+            save_state(state)
+            time.sleep(1)
 
 
 def run_preview(state):
@@ -281,18 +304,25 @@ def run_preview(state):
         key = f"prev-{sym}-{it.get('year')}Q{it.get('quarter')}"
         if state.get(key):
             continue
+        cat = CATEGORY_BY_TICKER.get(sym)
+        webhook = WEBHOOK_BY_CATEGORY.get(cat, "")
+        if not webhook:
+            print(f"[WARN] 板块「{cat}」未配置 webhook，跳过前瞻 {sym}")
+            continue
         report = gen_preview_report(it)
         if not report:
             continue
         head = f"📅 **{sym} 财报前瞻** | {it.get('date')} Q{it.get('quarter')} {it.get('year')}\n"
-        discord_send(head + report)
+        discord_send(webhook, head + report)
         state[key] = True
         save_state(state)
         time.sleep(1)
 
 
 def main():
-    print(f"[INFO] MODE={MODE} | 模型={OPENAI_MODEL} | 清单{len(WATCHLIST)}只")
+    configured = [c for c, w in WEBHOOK_BY_CATEGORY.items() if w]
+    print(f"[INFO] MODE={MODE} | 模型={OPENAI_MODEL} | 清单{len(WATCHLIST)}只 | "
+          f"已配置频道 {len(configured)}/9: {configured}")
     state = load_state()
     if MODE in ("post", "both"):
         run_post(state)
