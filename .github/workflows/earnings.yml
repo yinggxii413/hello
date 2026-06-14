@@ -37,8 +37,6 @@ jobs:
           WEBHOOK_SPACE:    ${{ secrets.WEBHOOK_SPACE }}      # 7-航天机器人
           WEBHOOK_ENERGY:   ${{ secrets.WEBHOOK_ENERGY }}     # 8-储能
           WEBHOOK_QUANTUM:  ${{ secrets.WEBHOOK_QUANTUM }}    # 9-量子
-          # ↓↓↓ 测试用：回看30天，能立刻抓到近一个月已发财报的票。看完效果请删掉这一行(恢复默认只看最近3天)
-          REPORTED_LOOKBACK: "30"
         run: python earnings_monitor.py
 
       - name: Save earnings state
