@@ -1,198 +1,44 @@
-import os
-import json
-import requests
-from openai import OpenAI
+name: X to Discord
 
-X_BEARER_TOKEN = os.environ["X_BEARER_TOKEN"]
-OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # 每 10 分钟一次(GitHub 可能漂到 15-20 分钟，属正常)
+  workflow_dispatch:
 
-STATE_FILE = "state.json"
+permissions:
+  contents: write
 
-ACCOUNTS = [
-    {
-        "username": "aleabitoreddit",
-        "display_name": "Serenity",
-        "webhook": os.environ.get("DISCORD_WEBHOOK"),
-    },
-    {
-        "username": "TrumpDailyPosts",
-        "display_name": "Trump Truth",
-        "webhook": os.environ.get("TRUMP_WEBHOOK"),
-    },
-    {
-        "username": "financialjuice",
-        "display_name": "Financial Juice",
-        "webhook": os.environ.get("FINANCIAL_JUICE_WEBHOOK"),
-    },
-]
+# 避免上一轮没结束又触发下一轮(导致 state.json 提交打架)
+concurrency:
+  group: x-to-discord
+  cancel-in-progress: false
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-headers = {
-    "Authorization": f"Bearer {X_BEARER_TOKEN}"
-}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
+      - run: pip install -r requirements.txt
 
-def load_state():
-    if not os.path.exists(STATE_FILE):
-        return {}
+      - name: Run X monitor (single pass)
+        env:
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}      # Serenity
+          TRUMP_WEBHOOK:   ${{ secrets.TRUMP_WEBHOOK }}        # Trump Truth
+          # FINANCIAL_JUICE_WEBHOOK: ${{ secrets.FINANCIAL_JUICE_WEBHOOK }}  # 已停用,恢复时取消注释
+          ONESHOT: "1"          # ★关键：单次模式，跑一轮就退出(否则会死循环占满 Actions)
+        run: python monitor.py
 
-    with open(STATE_FILE, "r") as f:
-        return json.load(f)
-
-
-def save_state(state):
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f)
-
-
-def get_user_id(username):
-    url = f"https://api.x.com/2/users/by/username/{username}"
-    r = requests.get(url, headers=headers)
-    r.raise_for_status()
-    return r.json()["data"]["id"]
-
-
-def get_latest_posts(user_id):
-    url = f"https://api.x.com/2/users/{user_id}/tweets"
-
-    params = {
-        "max_results": 10,
-        "tweet.fields": "created_at",
-    }
-
-    r = requests.get(url, headers=headers, params=params)
-    r.raise_for_status()
-    return r.json().get("data", [])
-
-
-def translate_to_chinese(text):
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是专业财经翻译助手。请翻译成自然流畅中文，保留股票代码、人名、公司名。",
-                },
-                {
-                    "role": "user",
-                    "content": text,
-                },
-            ],
-        )
-        return response.choices[0].message.content.strip()
-
-    except Exception as e:
-        print("Translation error:", str(e))
-        return "翻译失败"
-
-
-def send_to_discord(account, tweet):
-    if not account["webhook"]:
-        print(f"Missing webhook for {account['username']}")
-        return False
-
-    tweet_url = f"https://x.com/{account['username']}/status/{tweet['id']}"
-
-    original_text = tweet["text"]
-    chinese_text = translate_to_chinese(original_text)
-
-    payload = {
-        "embeds": [
-            {
-                "title": f"📰 {account['display_name']} 新推文",
-                "url": tweet_url,
-                "description": (
-                    f"**原文**\n{original_text[:1500]}\n\n"
-                    f"**中文翻译**\n{chinese_text[:1500]}"
-                ),
-                "color": 3447003,
-                "footer": {
-                    "text": f"来源：@{account['username']}"
-                },
-            }
-        ]
-    }
-
-    try:
-        r = requests.post(account["webhook"], json=payload, timeout=30)
-
-        print(
-            f"Discord post for {account['username']} "
-            f"{tweet['id']} status={r.status_code}"
-        )
-
-        if r.status_code >= 400:
-            print(r.text)
-            return False
-
-        return True
-
-    except Exception as e:
-        print("Discord error:", str(e))
-        return False
-
-
-def process_account(account, state):
-    username = account["username"]
-
-    try:
-        user_id = get_user_id(username)
-        posts = get_latest_posts(user_id)
-
-        print(f"{username}: fetched {len(posts)} posts")
-
-        if not posts:
-            return
-
-        newest_id = posts[0]["id"]
-        last_id = state.get(username)
-
-        print(f"{username}: newest={newest_id}")
-        print(f"{username}: saved={last_id}")
-
-        if last_id is None:
-            state[username] = newest_id
-            print(f"Initialized state for {username}")
-            return
-
-        new_posts = []
-
-        for post in posts:
-            if post["id"] == last_id:
-                break
-            new_posts.append(post)
-
-        print(f"{username}: new posts={len(new_posts)}")
-
-        sent_ok = True
-
-        for post in reversed(new_posts):
-            ok = send_to_discord(account, post)
-
-            if not ok:
-                sent_ok = False
-                break
-
-        if sent_ok:
-            state[username] = newest_id
-            print(f"{username}: state updated")
-        else:
-            print(f"{username}: state NOT updated")
-
-    except Exception as e:
-        print(f"{username}: ERROR -> {str(e)}")
-
-
-def main():
-    state = load_state()
-
-    for account in ACCOUNTS:
-        process_account(account, state)
-
-    save_state(state)
-
-
-if __name__ == "__main__":
-    main()
+      - name: Save state
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add state.json
+          git commit -m "update x state" || echo "No changes"
+          git push
