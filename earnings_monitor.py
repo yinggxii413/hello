@@ -30,6 +30,7 @@
 """
 
 import os
+import re
 import json
 import time
 import requests
@@ -44,9 +45,17 @@ MODE = os.environ.get("MODE", "post").strip().lower()
 REPORTED_LOOKBACK = int(os.environ.get("REPORTED_LOOKBACK", "3"))
 PREVIEW_AHEAD = int(os.environ.get("PREVIEW_AHEAD", "7"))
 
+# 电话会白名单：只有这些票才抓转录+发「电话会核心」(逗号分隔，默认只有 MU)
+TRANSCRIPT_TICKERS = {t.strip().upper() for t in
+                      os.environ.get("TRANSCRIPT_TICKERS", "MU").split(",") if t.strip()}
+
 STATE_FILE = "earnings_state.json"
 FINNHUB = "https://finnhub.io/api/v1"
+FOOL_ARCHIVE = "https://www.fool.com/earnings-call-transcripts"
 HTTP_TIMEOUT = 30
+# 抓 Motley Fool 需要真实 UA，否则可能被拦
+WEB_UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -156,6 +165,63 @@ def fetch_peers_pe(symbol, limit=4):
     return out
 
 
+# ---------------- 电话会转录(免费抓 Motley Fool 归档页，仅白名单) ----------------
+def _web_get(url):
+    try:
+        r = requests.get(url, headers=WEB_UA, timeout=HTTP_TIMEOUT)
+    except Exception as e:
+        print(f"[WARN] 抓取异常 {url}: {e}")
+        return None
+    if r.status_code != 200:
+        print(f"[WARN] 抓取 HTTP {r.status_code} {url}")
+        return None
+    return r.text
+
+
+def find_transcript_url(ticker, max_pages=6):
+    """在 Motley Fool 转录归档页里按 ticker 匹配最新转录链接。"""
+    tk = ticker.lower()
+    for page in range(1, max_pages + 1):
+        url = FOOL_ARCHIVE + ("/" if page == 1 else f"/page/{page}/")
+        html = _web_get(url)
+        if not html:
+            continue
+        links = re.findall(
+            r'(?:https://www\.fool\.com)?/earnings/call-transcripts/\d{4}/\d{2}/\d{2}/[a-z0-9-]+/?',
+            html)
+        for link in links:
+            slug = link.rstrip("/").rsplit("/", 1)[-1]
+            # ticker 以 -mu- 或 开头-mu 形式出现在 slug
+            if re.search(rf'(^|-){re.escape(tk)}(-|$)', slug):
+                return link if link.startswith("http") else "https://www.fool.com" + link
+    return None
+
+
+def fetch_transcript(ticker):
+    """返回(转录正文, 来源URL)；找不到返回(None, None)。"""
+    url = find_transcript_url(ticker)
+    if not url:
+        print(f"[INFO] {ticker}: 归档页未找到转录链接")
+        return None, None
+    html = _web_get(url)
+    if not html:
+        return None, url
+    # 去脚本/样式，剥标签，压空白
+    body = re.sub(r'(?is)<(script|style|noscript)[^>]*>.*?</\1>', ' ', html)
+    text = re.sub(r'(?s)<[^>]+>', ' ', body)
+    text = re.sub(r'&[a-z]+;', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    # 定位电话会正文起点，截掉前面的导航
+    start = len(text)
+    for marker in ("Prepared Remarks", "Operator", "Call participants", "Earnings Call"):
+        i = text.find(marker)
+        if 0 <= i < start:
+            start = i
+    if start == len(text):
+        start = 0
+    return text[start:start + 16000], url
+
+
 # ---------------- OpenAI ----------------
 SYS_POST = """你是专业的美股财报分析师。基于给定的【已披露财报实际数据】和关键指标，
 生成一份【中文】的财报数据分析，发到 Discord。
@@ -240,6 +306,54 @@ def gen_preview_report(item):
                  + json.dumps(payload, ensure_ascii=False))
 
 
+SYS_CALL = """你是专业的美股财报分析师。下面是某公司最新一季【电话会转录(英文)】。
+请用中文提炼【电话会核心】，发到 Discord。不要用 Markdown 表格，用加粗小标题逐条列。
+严格按下面结构(示例排版，内容换成真实信息)：
+
+📞 **{公司中文名}（{代码}）· 电话会核心** — FY{年} Q{季}
+
+**📊 业绩与指引**
+本季关键数字 + 下季/全年指引。**所有关键数字、超预期/纪录等结论都用粗体突出**。
+
+**🚀 业务亮点**
+增长最快/管理层着重强调的业务、产品、客户(每条把核心词加粗)。
+
+**⚠️ 隐忧/逆风**
+管理层提到的压力、放缓、供需/成本/需求的不确定性(关键点加粗)。
+
+**🤝 大客户/订单/产能**
+提到的大客户、长协、订单、产能/扩产、资本开支(数字加粗)。
+
+**💬 管理层原话**
+引用 **2-4 句**最有信息量的管理层原话：中文翻译为主、括号内保留关键英文短语，
+并标注是谁说的(CEO/CFO 姓名)。格式如：
+> "中文翻译……"（关键英文短语）—— CEO Sanjay Mehrotra
+
+**❓ Q&A 关键点**
+分析师最关心的 1-3 个问题 + 管理层回答要点(提问机构名可带上)。
+
+**🔻 风险提示**
+主要风险一句话概括。
+
+硬性要求：
+- **只基于提供的转录内容**，原话引用必须是转录里真实出现的，绝不编造数字、原话或不存在的表态；转录没提到的就不写。
+- **突出重点**：关键数字(营收/EPS/毛利率/指引/同比)、纪录、超预期、重大客户/订单一律**加粗**。
+- 简洁、适合手机看；中文，专业术语和关键短语可保留英文。
+- 结尾一行小字："以上为电话会要点的自动提炼，可能有遗漏，以公司正式披露为准。" """
+
+
+def gen_call_summary(item, company_name, transcript):
+    payload = {
+        "symbol": item.get("symbol"),
+        "company_name": company_name,
+        "quarter": item.get("quarter"),
+        "year": item.get("year"),
+        "transcript_excerpt": transcript,
+    }
+    return _chat(SYS_CALL, "公司电话会转录(JSON)，据此提炼电话会核心：\n\n"
+                 + json.dumps(payload, ensure_ascii=False))
+
+
 def _chat(system, user):
     try:
         resp = client.chat.completions.create(
@@ -302,7 +416,7 @@ def run_post(state):
     reported = [it for it in cal if it.get("symbol") in WATCHLIST and is_reported(it)]
     print(f"[INFO] 盘后模式：窗口 {frm}~{today}，清单内已披露 {len(reported)} 家")
 
-    # 按板块分组新增项
+    # ---- 1) 数据报告：按板块分组，post-key 去重(每只只发一次) ----
     by_cat = {}
     for it in reported:
         key = f"post-{it.get('symbol')}-{it.get('year')}Q{it.get('quarter')}"
@@ -310,10 +424,6 @@ def run_post(state):
             continue
         cat = CATEGORY_BY_TICKER.get(it.get("symbol"))
         by_cat.setdefault(cat, []).append((key, it))
-
-    if not by_cat:
-        print("[INFO] 无新披露财报，跳过。")
-        return
 
     for cat, items in by_cat.items():
         webhook = WEBHOOK_BY_CATEGORY.get(cat, "")
@@ -336,6 +446,34 @@ def run_post(state):
             discord_send(webhook, report)
             state[key] = True
             save_state(state)
+            time.sleep(1)
+
+    # ---- 2) 电话会：白名单票，call-key 独立去重 ----
+    # 转录可能比财报晚几小时才发布；没抓到就不标记 call-key，后续轮次继续重试(3天窗口内)。
+    for it in reported:
+        sym = it.get("symbol")
+        if sym not in TRANSCRIPT_TICKERS:
+            continue
+        ckey = f"call-{sym}-{it.get('year')}Q{it.get('quarter')}"
+        if state.get(ckey):
+            continue
+        cat = CATEGORY_BY_TICKER.get(sym)
+        webhook = WEBHOOK_BY_CATEGORY.get(cat, "")
+        if not webhook:
+            continue
+        tx, src = fetch_transcript(sym)
+        if not tx:
+            print(f"[INFO] {sym}: 转录暂未发布，待下一班重试")
+            continue  # 不标记 ckey → 下轮再试
+        name = fetch_company_name(sym)
+        summary = gen_call_summary(it, name, tx)
+        if summary:
+            if src:
+                summary += f"\n🔗 转录来源：{src}"
+            discord_send(webhook, summary)
+            state[ckey] = True
+            save_state(state)
+            print(f"[INFO] {sym}: 已发电话会核心")
             time.sleep(1)
 
 
