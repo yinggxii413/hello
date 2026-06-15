@@ -232,13 +232,17 @@ def _src_homepage(home_url, source_name):
     html = _get(home_url)
     if not html:
         return out
-    # 抓 文章链接 + 标题
-    links = re.findall(r'href="(https?://[^"]*?/article/[^"]+\.html)"[^>]*title="([^"]+)"', html)
     seen_local = set()
-    for url, title in links:
+    # 兼容 /article/ 与 /articles/(每经是复数)；title= 在 href 前或后都能取到
+    for mt in re.finditer(r'<a\b[^>]*?href="(https?://[^"]*?/articles?/[^"]+?\.html)"[^>]*?>', html):
+        anchor, url = mt.group(0), mt.group(1)
         if url in seen_local:
             continue
         seen_local.add(url)
+        tm = re.search(r'title="([^"]+)"', anchor)
+        title = tm.group(1) if tm else ""
+        if not title:
+            continue
         stock = match_watchlist(title)
         if stock and is_research(title):
             out.append({"title": title, "text": "", "url": url, "source": source_name, "stock": stock})
