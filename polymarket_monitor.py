@@ -36,6 +36,8 @@ TOPICS = [
      "webhook": os.environ.get("POLY_STOCKS_WEBHOOK", "").strip()},
     {"name": "世界杯", "tag": "world-cup", "emoji": "⚽", "color": 0x3498DB, "watchlist_only": False,
      "webhook": os.environ.get("POLY_WORLDCUP_WEBHOOK", "").strip()},
+    {"name": "特朗普", "tag": "trump", "emoji": "🇺🇸", "color": 0xE74C3C, "watchlist_only": False,
+     "webhook": os.environ.get("POLY_TRUMP_WEBHOOK", "").strip()},
 ]
 
 # ---- 股票频道：只保留涉及 watchlist 的市场 ----
