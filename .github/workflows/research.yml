@@ -1,0 +1,35 @@
+name: Research Monitor
+
+on:
+  schedule:
+    - cron: "0 1 * * *"    # UTC 01:00 = 北京 09:00（每天一次）
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install -r requirements.txt
+
+      - name: Run research monitor
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          RESEARCH_WEBHOOK: ${{ secrets.RESEARCH_WEBHOOK }}
+        run: python research_monitor.py
+
+      - name: Save state
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add research_state.json
+          git commit -m "update research state" || echo "No changes"
+          git push
