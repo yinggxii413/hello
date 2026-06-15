@@ -17,6 +17,7 @@ Polymarket 监控 -> 中文摘要 -> Discord（股票 + 世界杯）
 """
 
 import os
+import re
 import json
 import time
 import datetime as dt
@@ -29,13 +30,73 @@ TOP_N = int(os.environ.get("POLY_TOP_N", "10"))
 GAMMA = "https://gamma-api.polymarket.com"
 HTTP_TIMEOUT = 30
 
-# 话题配置：名称、Polymarket tag、对应频道 webhook、emoji
+# 话题配置：名称、tag、webhook、emoji、卡片颜色、是否只保留 watchlist 相关
 TOPICS = [
-    {"name": "股票", "tag": "stocks", "emoji": "📈",
+    {"name": "股票", "tag": "stocks", "emoji": "📈", "color": 0x2ECC71, "watchlist_only": True,
      "webhook": os.environ.get("POLY_STOCKS_WEBHOOK", "").strip()},
-    {"name": "世界杯", "tag": "world-cup", "emoji": "⚽",
+    {"name": "世界杯", "tag": "world-cup", "emoji": "⚽", "color": 0x3498DB, "watchlist_only": False,
      "webhook": os.environ.get("POLY_WORLDCUP_WEBHOOK", "").strip()},
 ]
+
+# ---- 股票频道：只保留涉及 watchlist 的市场 ----
+# 代码(区分大小写整词匹配) + 主要公司名(忽略大小写)
+WATCHLIST_TICKERS = {
+    "AMAT", "ONTO", "KLAC", "CAMT", "FORM", "AMKR", "AEHR", "ASML", "MU", "SNDK", "STX", "WDC",
+    "TSM", "AVGO", "AMD", "ARM", "NOK", "INTC", "MRVL", "QCOM", "ALAB", "VSH", "POET", "COHR",
+    "CRDO", "AAOI", "AXTI", "LITE", "SIVEF", "FN", "IREN", "NBIS", "HUT", "ORCL", "WULF", "NVTS",
+    "CRWV", "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "META", "NVDA", "TSLA", "SATS", "RKLB",
+    "ASTS", "LUNR", "PATH", "SPCE", "SPCX", "CEG", "ENPH", "FLNC", "CSIQ", "EOSE",
+    "IONQ", "QUBT", "QBTS", "LAES",
+}
+WATCHLIST_NAMES = [
+    "Nvidia", "Tesla", "Apple", "Microsoft", "Amazon", "Meta", "Google", "Alphabet", "Broadcom",
+    "Micron", "Intel", "Qualcomm", "Taiwan Semiconductor", "TSMC", "Oracle", "CoreWeave",
+    "Arm Holdings", "AMD", "Marvell", "Applied Materials", "ASML", "Rocket Lab", "IonQ",
+]
+
+
+def title_matches_watchlist(title):
+    if not title:
+        return False
+    for tk in WATCHLIST_TICKERS:  # 代码：区分大小写、整词
+        if re.search(rf'(?<![A-Za-z0-9]){re.escape(tk)}(?![A-Za-z0-9])', title):
+            return True
+    low = title.lower()
+    for nm in WATCHLIST_NAMES:    # 公司名：忽略大小写
+        if nm.lower() in low:
+            return True
+    return False
+
+
+# ---- 世界杯：国家 -> 国旗 emoji ----
+COUNTRY_FLAG = {
+    "France": "🇫🇷", "Spain": "🇪🇸", "Brazil": "🇧🇷", "Argentina": "🇦🇷", "Germany": "🇩🇪",
+    "Portugal": "🇵🇹", "Netherlands": "🇳🇱", "Italy": "🇮🇹", "Belgium": "🇧🇪", "Croatia": "🇭🇷",
+    "Mexico": "🇲🇽", "USA": "🇺🇸", "United States": "🇺🇸", "Canada": "🇨🇦", "Uruguay": "🇺🇾",
+    "Colombia": "🇨🇴", "Morocco": "🇲🇦", "Japan": "🇯🇵", "South Korea": "🇰🇷", "Korea": "🇰🇷",
+    "Senegal": "🇸🇳", "Norway": "🇳🇴", "Saudi Arabia": "🇸🇦", "Czechia": "🇨🇿",
+    "Czech Republic": "🇨🇿", "Switzerland": "🇨🇭", "Denmark": "🇩🇰", "Poland": "🇵🇱",
+    "Austria": "🇦🇹", "Ukraine": "🇺🇦", "Turkey": "🇹🇷", "Serbia": "🇷🇸", "Ecuador": "🇪🇨",
+    "Peru": "🇵🇪", "Chile": "🇨🇱", "Australia": "🇦🇺", "Iran": "🇮🇷", "Nigeria": "🇳🇬",
+    "Ghana": "🇬🇭", "Egypt": "🇪🇬", "Ivory Coast": "🇨🇮", "Cameroon": "🇨🇲", "Algeria": "🇩🇿",
+    "Tunisia": "🇹🇳", "Qatar": "🇶🇦", "Greece": "🇬🇷", "Sweden": "🇸🇪", "Hungary": "🇭🇺",
+    "Romania": "🇷🇴", "Ireland": "🇮🇪", "Costa Rica": "🇨🇷", "Panama": "🇵🇦", "Jamaica": "🇯🇲",
+    "Paraguay": "🇵🇾", "Venezuela": "🇻🇪", "Bolivia": "🇧🇴", "New Zealand": "🇳🇿",
+    "South Africa": "🇿🇦", "Bosnia and Herzegovina": "🇧🇦", "England": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+    "Scotland": "🏴󠁧󠁢󠁳󠁣󠁴󠁿", "Wales": "🏴󠁧󠁢󠁷󠁬󠁳󠁿",
+}
+
+RANK_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+
+
+def outcome_emoji(label):
+    if label in COUNTRY_FLAG:
+        return COUNTRY_FLAG[label]
+    if label in ("Yes", "是"):
+        return "✅"
+    if label in ("No", "否"):
+        return "❌"
+    return "▸"
 
 client = None
 if OPENAI_API_KEY:
@@ -163,23 +224,27 @@ def translate_titles(titles):
         return titles
 
 
-# ---------------- Discord ----------------
-def discord_send(webhook, text):
+# ---------------- Discord(embed 卡片) ----------------
+def discord_send_embed(webhook, title, description, color, footer):
     if not webhook:
         return
+    # embed 描述上限 4096，超长按行切成多张卡片
     chunks, buf = [], ""
-    for line in text.split("\n"):
-        if len(buf) + len(line) + 1 > 1900:
-            chunks.append(buf)
-            buf = line
+    for line in description.split("\n"):
+        if len(buf) + len(line) + 1 > 3900:
+            chunks.append(buf); buf = line
         else:
             buf = (buf + "\n" + line) if buf else line
     if buf:
         chunks.append(buf)
-    for ch in chunks:
+    for i, ch in enumerate(chunks):
+        embed = {"title": title if i == 0 else f"{title}（续 {i+1}）",
+                 "description": ch, "color": color}
+        if i == len(chunks) - 1 and footer:
+            embed["footer"] = {"text": footer}
         for _ in range(3):
             try:
-                r = requests.post(webhook, json={"content": ch}, timeout=HTTP_TIMEOUT)
+                r = requests.post(webhook, json={"embeds": [embed]}, timeout=HTTP_TIMEOUT)
             except Exception as e:
                 print(f"[WARN] Discord 异常: {e}"); time.sleep(2); continue
             if r.status_code in (200, 204):
@@ -196,30 +261,41 @@ def discord_send(webhook, text):
 
 # ---------------- 主流程 ----------------
 def run_topic(topic):
-    name, tag, webhook, emoji = topic["name"], topic["tag"], topic["webhook"], topic["emoji"]
+    name, tag, webhook = topic["name"], topic["tag"], topic["webhook"]
+    emoji, color, wl_only = topic["emoji"], topic["color"], topic.get("watchlist_only", False)
     if not webhook:
         print(f"[WARN] 话题「{name}」未配置 webhook，跳过")
         return
-    events = fetch_events(tag, max(TOP_N * 2, 20))
-    # 过滤掉没有有效结果的，按 24h 成交量取前 TOP_N
-    events = [e for e in events if event_outcomes(e)]
+    # 要做 watchlist 过滤时多抓一些，保证过滤后仍有 Top N
+    raw = fetch_events(tag, 100 if wl_only else max(TOP_N * 2, 20))
+    events = [e for e in raw if event_outcomes(e)]
+    if wl_only:
+        events = [e for e in events if title_matches_watchlist(e.get("title"))]
     events = sorted(events, key=event_volume, reverse=True)[:TOP_N]
     if not events:
-        print(f"[INFO] 话题「{name}」无可用市场")
+        print(f"[INFO] 话题「{name}」无可用市场（watchlist 过滤后可能为空）")
         return
     print(f"[INFO] 话题「{name}」→ {len(events)} 条")
 
     titles_zh = translate_titles([e.get("title") or "?" for e in events])
-    now = dt.datetime.utcnow() + dt.timedelta(hours=8)  # 北京时间
-    lines = [f"{emoji} **Polymarket · {name}** · 北京时间 {now.strftime('%Y/%m/%d %H:%M')}",
-             "_按 24 小时成交量排序_\n"]
+    body = []
     for i, ev in enumerate(events):
-        lines.append(f"**{i+1}. {titles_zh[i]}**")
-        for label, prob in event_outcomes(ev):
-            lines.append(f"　{zh_label(label)}：**{prob*100:.0f}%**")
-        url = f"https://polymarket.com/event/{ev.get('slug','')}"
-        lines.append(f"　成交量 {fmt_money(event_volume(ev))}　🔗 <{url}>\n")
-    discord_send(webhook, "\n".join(lines))
+        rank = RANK_EMOJI[i] if i < len(RANK_EMOJI) else f"{i+1}."
+        body.append(f"**{rank} {titles_zh[i]}**")
+        parts = []
+        for l, p in event_outcomes(ev):
+            flag = COUNTRY_FLAG.get(l, "")   # 仅世界杯国家有旗，其余不加 emoji
+            lab = (flag + " " if flag else "") + zh_label(l)
+            parts.append(f"{lab} **{p*100:.0f}%**")
+        body.append("　".join(parts))
+        body.append(f"成交量 {fmt_money(event_volume(ev))}")
+        url = f"https://polymarket.com/event/{ev.get('slug', '')}"
+        body.append(f"[查看市场]({url})\n")
+
+    now = dt.datetime.utcnow() + dt.timedelta(hours=8)  # 北京时间
+    title = f"{emoji} Polymarket · {name}"
+    footer = f"北京 {now.strftime('%Y/%m/%d %H:%M')} · 按 24h 成交量 · Top {len(events)}"
+    discord_send_embed(webhook, title, "\n".join(body), color, footer)
 
 
 def main():
