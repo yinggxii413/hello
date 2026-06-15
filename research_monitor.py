@@ -24,6 +24,7 @@ import os
 import re
 import json
 import time
+from datetime import date, timedelta
 import requests
 from openai import OpenAI
 
@@ -208,7 +209,11 @@ def src_wallstreetcn():
 
 def src_eastmoney():
     out = []
-    data = _get("https://reportapi.eastmoney.com/report/list?pageSize=50&pageNo=1&qType=0", as_json=True)
+    beg = (date.today() - timedelta(days=RESEARCH_LOOKBACK_DAYS)).isoformat()
+    end = date.today().isoformat()
+    url = ("https://reportapi.eastmoney.com/report/list?pageSize=50&pageNo=1&qType=0"
+           f"&beginTime={beg}&endTime={end}")
+    data = _get(url, as_json=True)
     for it in (data or {}).get("data", []) or []:
         blob = (it.get("title") or "") + " " + (it.get("stockName") or "")
         stock = match_watchlist(blob)
@@ -315,7 +320,9 @@ def main():
     items = []
     for fn in (src_finnhub, src_wallstreetcn, src_eastmoney, src_nbd, src_21jingji):
         try:
-            items += fn()
+            got = fn()
+            print(f"[INFO] 源 {fn.__name__}: 命中 {len(got)} 条")
+            items += got
         except Exception as e:
             print(f"[WARN] 源 {fn.__name__} 异常: {e}")
     print(f"[INFO] 命中 watchlist 研报候选 {len(items)} 条")
