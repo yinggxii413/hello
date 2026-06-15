@@ -25,6 +25,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           RESEARCH_WEBHOOK: ${{ secrets.RESEARCH_WEBHOOK }}
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}   # 复用财报的 key；评级接口若无权限会自动跳过
+          TEST_MODE: "1"
         run: python research_monitor.py
 
       - name: Save state
