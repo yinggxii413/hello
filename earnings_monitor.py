@@ -45,10 +45,6 @@ MODE = os.environ.get("MODE", "post").strip().lower()
 REPORTED_LOOKBACK = int(os.environ.get("REPORTED_LOOKBACK", "3"))
 PREVIEW_AHEAD = int(os.environ.get("PREVIEW_AHEAD", "7"))
 
-# 电话会白名单：只有这些票才抓转录+发「电话会核心」(逗号分隔，默认只有 MU)
-TRANSCRIPT_TICKERS = {t.strip().upper() for t in
-                      os.environ.get("TRANSCRIPT_TICKERS", "MU").split(",") if t.strip()}
-
 STATE_FILE = "earnings_state.json"
 FINNHUB = "https://finnhub.io/api/v1"
 FOOL_ARCHIVE = "https://www.fool.com/earnings-call-transcripts"
@@ -87,6 +83,15 @@ ENV_BY_CATEGORY = {c["name"]: c["env"] for c in CATEGORIES}
 WATCHLIST = set(CATEGORY_BY_TICKER.keys())
 # 启动时读取各频道 webhook(缺失为空字符串)
 WEBHOOK_BY_CATEGORY = {c["name"]: os.environ.get(c["env"], "").strip() for c in CATEGORIES}
+
+# 电话会白名单：默认 = watchlist 里除"抓不到"的标的外的全部。
+# 排除：非美上市(韩股/日股)、ETF、封闭式基金(本就没有电话会)。
+# Motley Fool 覆盖主流美股；冷门小票若没有转录，脚本会自动跳过、不报错。
+# 可用环境变量 TRANSCRIPT_TICKERS 覆盖(逗号分隔)。
+TRANSCRIPT_EXCLUDE = {"005930.KS", "000660.KS", "KIOXIA", "QTUM", "DXYZ"}
+_default_transcript = ",".join(t for t in sorted(WATCHLIST) if t not in TRANSCRIPT_EXCLUDE)
+TRANSCRIPT_TICKERS = {t.strip().upper() for t in
+                      os.environ.get("TRANSCRIPT_TICKERS", _default_transcript).split(",") if t.strip()}
 
 
 # ---------------- 状态(去重) ----------------
