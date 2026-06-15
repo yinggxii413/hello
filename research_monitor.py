@@ -86,13 +86,25 @@ WATCHLIST = {
     "诺基亚 (NOK)": ["诺基亚", "NOK", "Nokia"],
 }
 
-# ---- 投行 / 研报关键词（命中其一才算"研报/评级"类） ----
+# ---- 研报 / 分析类关键词（命中其一才算"研报/分析"，不只限调目标价） ----
 IB_KEYWORDS = [
+    # 投行/券商/评级动作
     "大摩", "摩根士丹利", "摩根大通", "小摩", "高盛", "美银", "美国银行", "花旗",
     "瑞银", "巴克莱", "杰富瑞", "伯恩斯坦", "富国", "德银", "麦格理", "汇丰",
-    "中金", "中信证券", "投行", "分析师",
+    "中金", "中信证券", "投行", "分析师", "机构",
     "评级", "目标价", "上调", "下调", "重申", "维持", "首予", "首次覆盖",
-    "买入", "增持", "减持", "看多", "看好", "唱多", "研报",
+    "买入", "增持", "减持", "看多", "看好", "唱多",
+    # 分析/解读/研究类(扩大范围)
+    "研报", "研究", "报告", "解读", "分析", "深度", "展望", "前景", "观点",
+    "趋势", "拐点", "受益", "梳理", "复盘", "测算", "预期",
+]
+
+# ---- 主题关键词（除 watchlist 外，半导体/AI 产业链相关也收录） ----
+THEME_KEYWORDS = [
+    "AI Agent", "AI agent", "AI芯片", "AI", "智能体", "大模型",
+    "存储芯片", "存储", "内存", "DRAM", "NAND", "HBM", "闪存",
+    "半导体", "芯片", "晶圆", "先进封装",
+    "CPU", "GPU", "算力", "光模块", "光通信", "数据中心",
 ]
 
 
@@ -103,6 +115,19 @@ def match_watchlist(text):
         for t in terms:
             if t in text:
                 return name
+    return None
+
+
+def match_topic(text):
+    """先匹配具体个股，再匹配主题词；返回标签或 None。"""
+    s = match_watchlist(text)
+    if s:
+        return s
+    if not text:
+        return None
+    for kw in THEME_KEYWORDS:
+        if kw in text:
+            return kw   # 用主题词作为标签
     return None
 
 
@@ -200,7 +225,7 @@ def src_wallstreetcn():
         title = it.get("title") or ""
         text = it.get("content_text") or ""
         blob = title + " " + text
-        stock = match_watchlist(blob)
+        stock = match_topic(blob)
         if stock and is_research(blob):
             out.append({"title": title or text[:40], "text": text,
                         "url": it.get("uri", ""), "source": "华尔街见闻", "stock": stock})
@@ -243,7 +268,7 @@ def _src_homepage(home_url, source_name):
         title = tm.group(1) if tm else ""
         if not title:
             continue
-        stock = match_watchlist(title)
+        stock = match_topic(title)
         if stock and is_research(title):
             out.append({"title": title, "text": "", "url": url, "source": source_name, "stock": stock})
     return out
@@ -258,12 +283,12 @@ def src_21jingji():
 
 
 # ---- OpenAI 整理成卡片 ----
-SYS = """你是财经研报编辑。下面是一条关于某只股票的"投行研报/评级"资讯(来自财经媒体)。
-请用中文整理成简洁的「研报解读」卡片，发到 Discord。不要用 Markdown 表格。
-严格按下面结构输出(emoji 固定，内容换成真实信息)：
+SYS = """你是财经研报编辑。下面是一条资讯——可能是投行研报/评级，也可能是对某公司或某主题(AI/半导体/存储/芯片等)的分析/解读。
+请用中文整理成简洁的卡片，发到 Discord。不要用 Markdown 表格。
+按下面结构输出(emoji 固定，**识别不到的行整行省略**，不要硬凑)：
 
-🏦 **{机构(投行/券商名)}**　评级 **{评级}**
-🎯 目标价 **{目标价}**
+🏦 **{机构(投行/券商/作者，有才写)}**　评级 **{评级(有才写)}**
+🎯 目标价 **{目标价(有才写)}**
 📌 {一句话核心观点，精炼，突出最关键的结论}
 
 💡 **解读**
@@ -354,9 +379,15 @@ def main():
         card = make_card(it)
         if not card:
             continue
-        embeds.append({"title": f"📈 {it['stock']}", "description": card[:4000],
-                       "color": 0xF1C40F,
-                       "footer": {"text": it["source"]}})
+        url = it.get("url") or ""
+        desc = card[:3800]
+        if url:
+            desc += f"\n\n🔗 [阅读原文]({url})"
+        embed = {"title": f"📈 {it['stock']}", "description": desc,
+                 "color": 0xF1C40F, "footer": {"text": it["source"]}}
+        if url:
+            embed["url"] = url   # 标题也可点进原文
+        embeds.append(embed)
         state["seen"].append(it.get("uid") or it.get("url") or it.get("title"))
         time.sleep(1)
 
