@@ -35,8 +35,6 @@ RESEARCH_MAX = int(os.environ.get("RESEARCH_MAX", "8"))
 
 FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY", "").strip()  # 复用财报的 key；无则跳过该源
 RESEARCH_LOOKBACK_DAYS = int(os.environ.get("RESEARCH_LOOKBACK_DAYS", "3"))
-# 测试开关：=1 时东方财富推最近研报(不限 watchlist)，用于在 Discord 看真实卡片效果；看完请删掉
-TEST_MODE = os.environ.get("TEST_MODE", "").strip() == "1"
 
 STATE_FILE = "research_state.json"
 HTTP_TIMEOUT = 30
@@ -219,8 +217,6 @@ def src_eastmoney():
     for it in (data or {}).get("data", []) or []:
         blob = (it.get("title") or "") + " " + (it.get("stockName") or "")
         stock = match_watchlist(blob)
-        if not stock and TEST_MODE:        # 测试模式：不限清单，用个股名当 stock
-            stock = it.get("stockName") or "A股"
         if stock:  # 东方财富本身就是研报，匹配到清单即可
             org = it.get("orgSName") or it.get("orgName") or ""
             rating = it.get("emRatingName") or ""
