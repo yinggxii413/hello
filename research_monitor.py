@@ -35,6 +35,8 @@ RESEARCH_MAX = int(os.environ.get("RESEARCH_MAX", "8"))
 
 FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY", "").strip()  # 复用财报的 key；无则跳过该源
 RESEARCH_LOOKBACK_DAYS = int(os.environ.get("RESEARCH_LOOKBACK_DAYS", "3"))
+# 测试开关：=1 时东方财富推最近研报(不限 watchlist)，用于在 Discord 看真实卡片效果；看完请删掉
+TEST_MODE = os.environ.get("TEST_MODE", "").strip() == "1"
 
 STATE_FILE = "research_state.json"
 HTTP_TIMEOUT = 30
@@ -217,6 +219,8 @@ def src_eastmoney():
     for it in (data or {}).get("data", []) or []:
         blob = (it.get("title") or "") + " " + (it.get("stockName") or "")
         stock = match_watchlist(blob)
+        if not stock and TEST_MODE:        # 测试模式：不限清单，用个股名当 stock
+            stock = it.get("stockName") or "A股"
         if stock:  # 东方财富本身就是研报，匹配到清单即可
             org = it.get("orgSName") or it.get("orgName") or ""
             rating = it.get("emRatingName") or ""
@@ -258,19 +262,23 @@ def src_21jingji():
 
 
 # ---- OpenAI 整理成卡片 ----
-SYS = """你是财经研报编辑。下面是一条关于某只股票的"投行研报/评级"相关资讯(来自财经媒体)。
-请用中文整理成简洁的「研报解读」，发到 Discord。不要用 Markdown 表格。按这个结构：
+SYS = """你是财经研报编辑。下面是一条关于某只股票的"投行研报/评级"资讯(来自财经媒体)。
+请用中文整理成简洁的「研报解读」卡片，发到 Discord。不要用 Markdown 表格。
+严格按下面结构输出(emoji 固定，内容换成真实信息)：
 
-**{标题(精炼,可改写更清晰)}**
-来源：{媒体}｜机构：{识别到的投行/券商，没有则写"—"}
-（若提到）评级/目标价：{内容}
+🏦 **{机构(投行/券商名)}**　评级 **{评级}**
+🎯 目标价 **{目标价}**
+📌 {一句话核心观点，精炼，突出最关键的结论}
 
-**解读**
-- 2-4 条核心要点(投行观点、逻辑、对该股影响)
+💡 **解读**
+• {要点1，关键词/数字加粗}
+• {要点2}
+•（最多 4 条）
 
 硬性要求：
-- 只基于提供的内容，**绝不编造数字、评级或不存在的表态**；信息少就只写确定的。
-- 简洁、突出重点，适合手机看。"""
+- **只基于提供的内容**，绝不编造机构/评级/目标价/数字；某项识别不到就**整行省略**(不要写"—"或"暂无")。
+- **重点突出**：机构、评级、目标价、关键数字一律**加粗**。
+- 简洁、适合手机看；中文为主，术语可留英文。"""
 
 
 def make_card(item):
