@@ -32,8 +32,23 @@ RESEARCH_WEBHOOK = os.environ["RESEARCH_WEBHOOK"]
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini").strip()
 RESEARCH_MAX = int(os.environ.get("RESEARCH_MAX", "8"))
 
+FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY", "").strip()  # 复用财报的 key；无则跳过该源
+RESEARCH_LOOKBACK_DAYS = int(os.environ.get("RESEARCH_LOOKBACK_DAYS", "3"))
+
 STATE_FILE = "research_state.json"
 HTTP_TIMEOUT = 30
+
+# Finnhub 评级源用：美股代码 -> 展示名
+TICKER_TO_NAME = {
+    "NVDA": "英伟达 (NVDA)", "AVGO": "博通 (AVGO)", "AMD": "AMD", "INTC": "英特尔 (INTC)",
+    "QCOM": "高通 (QCOM)", "ARM": "Arm (ARM)", "MRVL": "Marvell (MRVL)", "TSM": "台积电 (TSM)",
+    "ASML": "ASML", "AMAT": "应用材料 (AMAT)", "KLAC": "KLA (KLAC)", "MU": "美光 (MU)",
+    "WDC": "西部数据 (WDC)", "AAPL": "苹果 (AAPL)", "MSFT": "微软 (MSFT)", "GOOGL": "谷歌 (GOOGL)",
+    "AMZN": "亚马逊 (AMZN)", "META": "Meta (META)", "TSLA": "特斯拉 (TSLA)", "ORCL": "甲骨文 (ORCL)",
+    "CRWV": "CoreWeave (CRWV)", "SMCI": "超微电脑 (SMCI)", "COHR": "Coherent (COHR)",
+    "LITE": "Lumentum (LITE)", "RKLB": "Rocket Lab (RKLB)", "COIN": "Coinbase (COIN)", "NOK": "诺基亚 (NOK)",
+}
+ACTION_ZH = {"up": "上调", "down": "下调", "init": "首次覆盖", "main": "维持", "reit": "重申"}
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
 
@@ -137,6 +152,45 @@ def html_to_text(html, limit=4000):
 
 
 # ---- 各数据源：返回 [{title, text, url, source, stock}] ----
+def src_finnhub():
+    """Finnhub 分析师评级变动（付费档接口；无权限自动跳过）。"""
+    if not FINNHUB_API_KEY:
+        return []
+    out = []
+    cutoff = time.time() - RESEARCH_LOOKBACK_DAYS * 86400
+    for tk, name in TICKER_TO_NAME.items():
+        url = f"https://finnhub.io/api/v1/stock/upgrade-downgrade?symbol={tk}&token={FINNHUB_API_KEY}"
+        try:
+            r = requests.get(url, timeout=HTTP_TIMEOUT)
+        except Exception as e:
+            print(f"[WARN] Finnhub 异常: {e}"); continue
+        if r.status_code in (401, 403):
+            print("[WARN] Finnhub 评级接口无权限(可能需付费档)，跳过该源")
+            return out
+        if r.status_code != 200:
+            continue
+        try:
+            data = r.json()
+        except Exception:
+            continue
+        if not isinstance(data, list):
+            continue
+        for d in data[:10]:
+            gt = d.get("gradeTime", 0) or 0
+            if gt < cutoff:
+                continue
+            firm = d.get("company", "") or "某机构"
+            frm, to = d.get("fromGrade") or "", d.get("toGrade") or ""
+            act = ACTION_ZH.get(d.get("action", ""), d.get("action", ""))
+            out.append({"title": f"{firm} {act} {name} 评级至 {to}",
+                        "text": f"{firm} {act} {name} 评级：{frm} → {to}",
+                        "url": f"https://stockanalysis.com/stocks/{tk.lower()}/",
+                        "source": f"Finnhub·{firm}", "stock": name,
+                        "uid": f"fh-{tk}-{int(gt)}-{firm}"})
+        time.sleep(0.15)
+    return out
+
+
 def src_wallstreetcn():
     out = []
     data = _get("https://api-one.wallstcn.com/apiv1/content/lives?channel=global-channel&client=pc&limit=60", as_json=True)
@@ -259,7 +313,7 @@ def main():
     state = load_state()
     seen = set(state["seen"])
     items = []
-    for fn in (src_wallstreetcn, src_eastmoney, src_nbd, src_21jingji):
+    for fn in (src_finnhub, src_wallstreetcn, src_eastmoney, src_nbd, src_21jingji):
         try:
             items += fn()
         except Exception as e:
@@ -269,7 +323,7 @@ def main():
     # 去重(按 url，无 url 用 标题)
     new_items, used = [], set()
     for it in items:
-        key = it.get("url") or it.get("title")
+        key = it.get("uid") or it.get("url") or it.get("title")
         if not key or key in seen or key in used:
             continue
         used.add(key)
@@ -288,7 +342,7 @@ def main():
         embeds.append({"title": f"📈 {it['stock']}", "description": card[:4000],
                        "color": 0xF1C40F,
                        "footer": {"text": it["source"]}})
-        state["seen"].append(it.get("url") or it.get("title"))
+        state["seen"].append(it.get("uid") or it.get("url") or it.get("title"))
         time.sleep(1)
 
     discord_send(embeds)
