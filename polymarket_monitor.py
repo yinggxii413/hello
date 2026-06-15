@@ -33,6 +33,7 @@ HTTP_TIMEOUT = 30
 # 话题配置：名称、tag、webhook、emoji、卡片颜色、是否只保留 watchlist 相关
 TOPICS = [
     {"name": "股票", "tag": "stocks", "emoji": "📈", "color": 0x2ECC71, "watchlist_only": True,
+     "per_market": True,  # 一只票一张卡，带公司 logo
      "webhook": os.environ.get("POLY_STOCKS_WEBHOOK", "").strip()},
     {"name": "世界杯", "tag": "world-cup", "emoji": "⚽", "color": 0x3498DB, "watchlist_only": False,
      "webhook": os.environ.get("POLY_WORLDCUP_WEBHOOK", "").strip()},
@@ -227,7 +228,28 @@ def translate_titles(titles):
 
 
 # ---------------- Discord(embed 卡片) ----------------
-def discord_send_embed(webhook, title, description, color, footer):
+def discord_send_multi(webhook, content, embeds):
+    """一条消息发多张 embed 卡片(Discord 单条最多 10 个 embed)。"""
+    if not webhook or not embeds:
+        return
+    payload = {"content": content[:1900], "embeds": embeds[:10]}
+    for _ in range(3):
+        try:
+            r = requests.post(webhook, json=payload, timeout=HTTP_TIMEOUT)
+        except Exception as e:
+            print(f"[WARN] Discord 异常: {e}"); time.sleep(2); continue
+        if r.status_code in (200, 204):
+            return
+        if r.status_code == 429:
+            try:
+                time.sleep(float(r.json().get("retry_after", 1.5)) + 0.3)
+            except Exception:
+                time.sleep(2)
+            continue
+        print(f"[WARN] Discord HTTP {r.status_code}: {r.text[:140]}"); return
+
+
+def discord_send_embed(webhook, title, description, color, footer, thumbnail=None):
     if not webhook:
         return
     # embed 描述上限 4096，超长按行切成多张卡片
@@ -242,6 +264,8 @@ def discord_send_embed(webhook, title, description, color, footer):
     for i, ch in enumerate(chunks):
         embed = {"title": title if i == 0 else f"{title}（续 {i+1}）",
                  "description": ch, "color": color}
+        if i == 0 and thumbnail:
+            embed["thumbnail"] = {"url": thumbnail}
         if i == len(chunks) - 1 and footer:
             embed["footer"] = {"text": footer}
         for _ in range(3):
@@ -262,6 +286,17 @@ def discord_send_embed(webhook, title, description, color, footer):
 
 
 # ---------------- 主流程 ----------------
+def market_block(ev):
+    """单个市场描述：结果概率 + 成交量 + 链接(各占一行)。"""
+    parts = []
+    for l, p in event_outcomes(ev):
+        flag = COUNTRY_FLAG.get(l, "")   # 仅世界杯国家有旗，其余不加 emoji
+        lab = (flag + " " if flag else "") + zh_label(l)
+        parts.append(f"{lab} **{p*100:.0f}%**")
+    url = f"https://polymarket.com/event/{ev.get('slug', '')}"
+    return "　".join(parts) + f"\n成交量 {fmt_money(event_volume(ev))}\n[查看市场]({url})"
+
+
 def run_topic(topic):
     name, tag, webhook = topic["name"], topic["tag"], topic["webhook"]
     emoji, color, wl_only = topic["emoji"], topic["color"], topic.get("watchlist_only", False)
@@ -280,24 +315,31 @@ def run_topic(topic):
     print(f"[INFO] 话题「{name}」→ {len(events)} 条")
 
     titles_zh = translate_titles([e.get("title") or "?" for e in events])
-    body = []
-    for i, ev in enumerate(events):
-        rank = RANK_EMOJI[i] if i < len(RANK_EMOJI) else f"{i+1}."
-        body.append(f"**{rank} {titles_zh[i]}**")
-        parts = []
-        for l, p in event_outcomes(ev):
-            flag = COUNTRY_FLAG.get(l, "")   # 仅世界杯国家有旗，其余不加 emoji
-            lab = (flag + " " if flag else "") + zh_label(l)
-            parts.append(f"{lab} **{p*100:.0f}%**")
-        body.append("　".join(parts))
-        body.append(f"成交量 {fmt_money(event_volume(ev))}")
-        url = f"https://polymarket.com/event/{ev.get('slug', '')}"
-        body.append(f"[查看市场]({url})\n")
-
     now = dt.datetime.utcnow() + dt.timedelta(hours=8)  # 北京时间
-    title = f"{emoji} Polymarket · {name}"
     footer = f"北京 {now.strftime('%Y/%m/%d %H:%M')} · 按 24h 成交量 · Top {len(events)}"
-    discord_send_embed(webhook, title, "\n".join(body), color, footer)
+
+    if topic.get("per_market"):
+        # 一条消息内放多张带 logo 的卡(Discord 单条最多 10 个 embed)
+        embeds = []
+        for i, ev in enumerate(events[:10]):
+            rank = RANK_EMOJI[i] if i < len(RANK_EMOJI) else f"{i+1}."
+            # logo 放左边：用 author 的小图标 + 标题
+            author = {"name": f"{rank} {titles_zh[i]}"[:256]}
+            icon = ev.get("icon") or ev.get("image")
+            if icon:
+                author["icon_url"] = icon
+            embeds.append({"author": author, "description": market_block(ev), "color": color})
+        header = f"{emoji} **Polymarket · {name}** · {footer}"
+        discord_send_multi(webhook, header, embeds)
+    else:
+        # 摘要卡：一张卡列 Top N
+        body = []
+        for i, ev in enumerate(events):
+            rank = RANK_EMOJI[i] if i < len(RANK_EMOJI) else f"{i+1}."
+            body.append(f"**{rank} {titles_zh[i]}**")
+            body.append(market_block(ev) + "\n")
+        discord_send_embed(webhook, f"{emoji} Polymarket · {name}",
+                           "\n".join(body), color, footer)
 
 
 def main():
