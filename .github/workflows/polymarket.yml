@@ -22,5 +22,6 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           POLY_STOCKS_WEBHOOK: ${{ secrets.POLY_STOCKS_WEBHOOK }}      # 股票频道
           POLY_WORLDCUP_WEBHOOK: ${{ secrets.POLY_WORLDCUP_WEBHOOK }}  # 世界杯频道
+          POLY_TRUMP_WEBHOOK: ${{ secrets.POLY_TRUMP_WEBHOOK }}        # 特朗普频道
           # POLY_TOP_N: "10"     # 可选：每话题取前几条
         run: python polymarket_monitor.py
