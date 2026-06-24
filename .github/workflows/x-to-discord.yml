@@ -27,11 +27,11 @@ jobs:
 
       - name: Run X monitor (single pass)
         env:
-          TWITTERAPI_KEY: ${{ secrets.TWITTERAPI_KEY }}
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}      # Serenity
+          # DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}   # Serenity 已停用
           TRUMP_WEBHOOK:   ${{ secrets.TRUMP_WEBHOOK }}        # Trump Truth
-          # FINANCIAL_JUICE_WEBHOOK: ${{ secrets.FINANCIAL_JUICE_WEBHOOK }}  # 已停用,恢复时取消注释
+          WSJ_WEBHOOK:     ${{ secrets.WSJ_WEBHOOK }}          # 华尔街日报(中文，不翻译)
           ONESHOT: "1"          # ★关键：单次模式，跑一轮就退出(否则会死循环占满 Actions)
         run: python monitor.py
 
