@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-X(Twitter) -> 中文翻译 -> Discord  常驻轮询优化版
-==================================================
-为按量付费的 X API 优化：
-  • 用 since_id：每次只取"比上次更新的"新推，没新推=0条读=0花费。
-  • 缓存 user_id：账号 ID 永不变，只查一次，省掉重复 user 查询。
-  • 常驻 while 循环：每 POLL_INTERVAL 秒轮询一次(默认120s)，准实时。
-  • 429 限流自动退避；任何异常都不退出循环(适合 systemd 守护)。
+X(Twitter) -> 中文翻译 -> Discord  常驻轮询版（TwitterAPI.io 数据源）
+=====================================================================
+抓取层使用 TwitterAPI.io（第三方），替代 X 官方 API。
+翻译 / 去重 / Discord 推送逻辑与官方 API 版完全一致。
+
+去重：state.json 存每账号最后处理的推文 ID（since_id）。
+  TwitterAPI.io 的 advanced_search 不支持服务端 since_id 参数，
+  因此改为客户端按 tweet_id 过滤（X 推文 ID 单调递增，可直接比较）。
+  注意：tweet_id 与官方 API 完全相同，所以旧 state.json 可无缝继承。
 
 运行模式：
-  默认常驻循环；设 ONESHOT=1 则只跑一轮就退出(兼容 GitHub Actions 旧用法)。
-  ⚠️ 一旦在 VM 上常驻运行，请关闭/删除 GitHub 的「X to Discord」定时任务，避免重复推送。
+  默认常驻循环；设 ONESHOT=1 则只跑一轮就退出（GitHub Actions 用法）。
 
 必填环境变量：
-  X_BEARER_TOKEN        X API Bearer Token
-  OPENAI_API_KEY        OpenAI key(翻译用)
-各账号的 Discord Webhook(缺则该账号跳过)：
+  TWITTERAPI_KEY    TwitterAPI.io 的 API Key（X-API-Key 头）
+  OPENAI_API_KEY    OpenAI key（翻译用）
+各账号的 Discord Webhook（缺则该账号跳过）：
   DISCORD_WEBHOOK            -> Serenity
   TRUMP_WEBHOOK             -> Trump Truth
-  FINANCIAL_JUICE_WEBHOOK   -> Financial Juice(当前已停用)
+  FINANCIAL_JUICE_WEBHOOK   -> Financial Juice（当前已停用）
 可选：
   POLL_INTERVAL   轮询间隔秒，默认 120
   OPENAI_MODEL    翻译模型，默认 gpt-4o-mini
@@ -33,7 +34,7 @@ import time
 import requests
 from openai import OpenAI
 
-X_BEARER_TOKEN = os.environ["X_BEARER_TOKEN"]
+TWITTERAPI_KEY = os.environ["TWITTERAPI_KEY"]
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "120"))
@@ -41,8 +42,9 @@ OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini").strip()
 ONESHOT = os.environ.get("ONESHOT", "").strip() == "1"
 STATE_FILE = os.environ.get("STATE_FILE", "state.json")
 
-X_API = "https://api.x.com/2"
+TWITTERAPI_BASE = "https://api.twitterapi.io"
 HTTP_TIMEOUT = 30
+MAX_PAGES = 10  # 增量轮询时最多翻页数（防某账号一轮发太多导致失控）
 
 # 监控账号。新增账号：加一项并为它配一个 webhook 环境变量即可。
 ACCOUNTS = [
@@ -56,7 +58,7 @@ ACCOUNTS = [
         "display_name": "Trump Truth",
         "webhook": os.environ.get("TRUMP_WEBHOOK"),
     },
-    # 已停用(高频号，省钱)。要恢复取消下面注释即可：
+    # 已停用（高频号，省钱）。要恢复取消下面注释即可：
     # {
     #     "username": "financialjuice",
     #     "display_name": "Financial Juice",
@@ -65,25 +67,26 @@ ACCOUNTS = [
 ]
 
 client = OpenAI(api_key=OPENAI_API_KEY)
-HEADERS = {"Authorization": f"Bearer {X_BEARER_TOKEN}"}
+HEADERS = {"X-API-Key": TWITTERAPI_KEY}
 
 
 # ---------------- 状态 ----------------
-# 结构: {"user_ids": {username: id}, "since_id": {username: tweet_id}}
+# 结构: {"since_id": {username: tweet_id}}
 def load_state():
     if not os.path.exists(STATE_FILE):
-        return {"user_ids": {}, "since_id": {}}
+        return {"since_id": {}}
     try:
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             s = json.load(f)
     except Exception:
-        return {"user_ids": {}, "since_id": {}}
-    # 兼容旧格式 {username: newest_id}
-    if "since_id" not in s and "user_ids" not in s:
-        s = {"user_ids": {}, "since_id": {k: v for k, v in s.items()}}
-    s.setdefault("user_ids", {})
-    s.setdefault("since_id", {})
-    return s
+        return {"since_id": {}}
+    # 兼容官方 API 版的旧格式 {"user_ids":..., "since_id":...}
+    if isinstance(s, dict) and "since_id" in s:
+        return {"since_id": dict(s.get("since_id", {}))}
+    # 兼容最早的格式 {username: newest_id}
+    if isinstance(s, dict):
+        return {"since_id": {k: v for k, v in s.items() if isinstance(v, str)}}
+    return {"since_id": {}}
 
 
 def save_state(state):
@@ -91,55 +94,64 @@ def save_state(state):
         json.dump(state, f, ensure_ascii=False)
 
 
-# ---------------- X API(带 429 退避) ----------------
-def x_get(url, params=None):
+# ---------------- TwitterAPI.io（带 429 退避） ----------------
+def http_get(url, params=None):
     for attempt in range(4):
         try:
             r = requests.get(url, headers=HEADERS, params=params, timeout=HTTP_TIMEOUT)
         except Exception as e:
-            print(f"[WARN] X 请求异常: {e}"); time.sleep(3); continue
+            print(f"[WARN] 请求异常: {e}"); time.sleep(3); continue
         if r.status_code == 200:
             return r.json()
-        if r.status_code == 429:  # 限流：等到 reset 再试
-            reset = r.headers.get("x-rate-limit-reset")
-            now = int(time.time())
-            wait = max(5, (int(reset) - now) if reset and reset.isdigit() else 30)
-            wait = min(wait, 900)  # 最多等15分钟
-            print(f"[WARN] X 限流(429)，等待 {wait}s 后重试")
-            time.sleep(wait + 1); continue
-        print(f"[WARN] X HTTP {r.status_code}: {r.text[:160]}")
+        if r.status_code == 429:  # TwitterAPI.io 几乎不限流，遇到就短暂退避
+            print("[WARN] 限流(429)，等待 10s 后重试")
+            time.sleep(10); continue
+        print(f"[WARN] HTTP {r.status_code}: {r.text[:160]}")
         return None
     return None
 
 
-def get_user_id(username, state):
-    """优先用缓存，缓存没有才查一次并写回 state。"""
-    cached = state["user_ids"].get(username)
-    if cached:
-        return cached
-    data = x_get(f"{X_API}/users/by/username/{username}")
-    if not data or "data" not in data:
-        return None
-    uid = data["data"]["id"]
-    state["user_ids"][username] = uid
-    save_state(state)
-    return uid
-
-
-def get_new_posts(user_id, since_id):
-    """只取比 since_id 更新的推文(没有则少量取最新用于初始化)。返回(列表, 是否首次)。"""
-    params = {"tweet.fields": "created_at"}
-    if since_id:
-        params["since_id"] = since_id
-        params["max_results"] = 100   # 用 since_id 时只返回新推，按返回条数计费
-        first = False
-    else:
-        params["max_results"] = 5     # 首次仅取少量，确定起点，不回灌历史
-        first = True
-    data = x_get(f"{X_API}/users/{user_id}/tweets", params)
-    if not data:
-        return None, first
-    return data.get("data", []) or [], first
+def get_new_posts(username, since_id):
+    """用 advanced_search 取该账号推文。
+    有 since_id：翻页累积所有 id > since_id 的新推（遇到旧推即停）。
+    无 since_id：只取第一页用于确定起点，不回灌历史。
+    返回 (列表[最新在前], 是否首次)。失败返回 (None, first)。
+    """
+    first = since_id is None
+    collected = []
+    cursor = None
+    pages = 1 if first else MAX_PAGES
+    for _ in range(pages):
+        params = {"query": f"from:{username}", "queryType": "Latest"}
+        if cursor:
+            params["cursor"] = cursor
+        data = http_get(f"{TWITTERAPI_BASE}/twitter/tweet/advanced_search", params)
+        if data is None:
+            return (collected or None), first
+        page = data.get("tweets", []) or []
+        if not page:
+            break
+        if first:
+            collected = page
+            break
+        # 增量：保留比 since_id 新的；遇到 <= since_id 即停止翻页
+        stop = False
+        for t in page:
+            try:
+                newer = int(t["id"]) > int(since_id)
+            except (ValueError, KeyError):
+                newer = False
+            if newer:
+                collected.append(t)
+            else:
+                stop = True
+                break
+        if stop or not data.get("has_next_page"):
+            break
+        cursor = data.get("next_cursor")
+    # 统一保证最新在前（不依赖 API 返回顺序）
+    collected.sort(key=lambda t: int(t["id"]), reverse=True)
+    return collected, first
 
 
 # ---------------- 翻译 ----------------
@@ -197,11 +209,8 @@ def send_to_discord(account, tweet):
 def process_account(account, state):
     username = account["username"]
     try:
-        uid = get_user_id(username, state)
-        if not uid:
-            print(f"[WARN] {username}: 取 user_id 失败"); return
         since = state["since_id"].get(username)
-        posts, first = get_new_posts(uid, since)
+        posts, first = get_new_posts(username, since)
         if posts is None:
             print(f"[WARN] {username}: 取推文失败"); return
         if not posts:
@@ -212,9 +221,9 @@ def process_account(account, state):
             # 首次：只记起点，不回灌历史，避免刷屏
             state["since_id"][username] = newest_id
             save_state(state)
-            print(f"[INFO] {username}: 初始化起点 {newest_id}(不回灌历史)")
+            print(f"[INFO] {username}: 初始化起点 {newest_id}（不回灌历史）")
             return
-        # 按时间正序逐条发送(API 返回为最新在前)
+        # 按时间正序逐条发送（get_new_posts 已保证最新在前）
         sent_ok = True
         for post in reversed(posts):
             if not send_to_discord(account, post):
@@ -225,7 +234,7 @@ def process_account(account, state):
             save_state(state)
             print(f"[INFO] {username}: 推送 {len(posts)} 条，起点更新到 {newest_id}")
         else:
-            print(f"[WARN] {username}: 有发送失败，起点不更新(下轮重试)")
+            print(f"[WARN] {username}: 有发送失败，起点不更新（下轮重试）")
     except Exception as e:
         print(f"[WARN] {username}: 异常 -> {e}")
 
@@ -234,12 +243,12 @@ def process_account(account, state):
 def one_pass(state):
     for acc in ACCOUNTS:
         process_account(acc, state)
-        time.sleep(2)  # 账号间错峰，减轻限流
+        time.sleep(2)  # 账号间错峰
 
 
 def main():
     print(f"[INFO] 启动 | 账号 {len(ACCOUNTS)} 个 | 间隔 {POLL_INTERVAL}s | "
-          f"模型 {OPENAI_MODEL} | {'单次' if ONESHOT else '常驻循环'}")
+          f"模型 {OPENAI_MODEL} | 数据源 TwitterAPI.io | {'单次' if ONESHOT else '常驻循环'}")
     state = load_state()
     if ONESHOT:
         one_pass(state)
