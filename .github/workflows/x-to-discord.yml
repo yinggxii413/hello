@@ -27,7 +27,7 @@ jobs:
 
       - name: Run X monitor (single pass)
         env:
-          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          TWITTERAPI_KEY:  ${{ secrets.TWITTERAPI_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           # DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}   # Serenity 已停用
           TRUMP_WEBHOOK:   ${{ secrets.TRUMP_WEBHOOK }}        # Trump Truth
