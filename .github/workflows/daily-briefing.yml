@@ -2,9 +2,9 @@ name: Daily AI Infra Briefing
 
 on:
   schedule:
-    # GitHub 的 cron 用 UTC 时间。00:00 UTC = 北京时间 08:00。
+    # GitHub 的 cron 用 UTC 时间。23:00 UTC = 北京时间次日 07:00。
     # 若你不在东八区，改下面这行（和脚本里的 hours=8）。
-    - cron: "0 0 * * *"
+    - cron: "0 23 * * *"
   workflow_dispatch: {}   # 允许在 GitHub 网页上手动点一次测试
 
 jobs:
