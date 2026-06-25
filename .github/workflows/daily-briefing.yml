@@ -1,1 +1,30 @@
+name: Daily AI Infra Briefing
 
+on:
+  schedule:
+    # GitHub 的 cron 用 UTC 时间。00:00 UTC = 北京时间 08:00。
+    # 若你不在东八区，改下面这行（和脚本里的 hours=8）。
+    - cron: "0 0 * * *"
+  workflow_dispatch: {}   # 允许在 GitHub 网页上手动点一次测试
+
+jobs:
+  send-briefing:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate and post briefing
+        env:
+          # 脚本里的环境变量名不变；右边的 secret 名用独立的，避免覆盖你已有的 DISCORD_WEBHOOK_URL
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.BRIEFING_WEBHOOK_URL }}
+        run: python generate_and_post.py
