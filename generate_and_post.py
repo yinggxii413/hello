@@ -22,7 +22,9 @@ MODEL = os.environ.get("BRIEFING_MODEL", "claude-sonnet-4-6")
 DISCORD_LIMIT = 1900  # 留余量，Discord 单条上限 2000 字符
 
 # 用东八区（北京时间）算"今天"，避免 UTC 跨日。如需改时区改 hours=8。
-TODAY = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime("%-m月%-d日")
+TODAY = (
+    datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=8)
+).strftime("%-m月%-d日")
 
 PROMPT = f"""请生成一份「AI基础设施每日简报」，中文，今天是 {TODAY}。供直接发到 Discord 频道。
 
@@ -76,7 +78,13 @@ def post_to_discord(text):
     for i, c in enumerate(chunk(text)):
         data = json.dumps({"content": c}).encode("utf-8")
         req = urllib.request.Request(
-            url, data=data, headers={"Content-Type": "application/json"}
+            url,
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                # Discord/Cloudflare 会拦截默认的 python-urllib UA，必须自带 User-Agent
+                "User-Agent": "ai-infra-briefing-bot/1.0 (+github-actions)",
+            },
         )
         with urllib.request.urlopen(req, timeout=20) as r:
             print(f"已发送第 {i+1} 段 -> HTTP {r.status}")
