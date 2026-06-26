@@ -2,10 +2,10 @@ name: Daily AI Infra Briefing
 
 on:
   schedule:
-    # GitHub 的 cron 用 UTC 时间。22:10 UTC = 北京时间次日 06:10。
-    # 故意设早 + 避开整点 :00，给 GitHub 的延迟留足缓冲，确保 8:00 前一定发出。
+    # GitHub 的 cron 用 UTC 时间。22:13 UTC = 北京时间次日 06:13。
+    # 设早留缓冲（确保 8:00 前发出）；用 :13 这种非整十分钟，避开 X 监控 */10 的并发 push。
     # 若你不在东八区，改下面这行（和脚本里的 hours=8）。
-    - cron: "10 22 * * *"
+    - cron: "13 22 * * *"
   workflow_dispatch: {}   # 允许在 GitHub 网页上手动点一次测试
 
 permissions:
@@ -38,5 +38,15 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
           git add briefing_state.json
-          git diff --staged --quiet || git commit -m "update briefing state"
-          git push
+          # 没变化就直接退出
+          git diff --staged --quiet && echo "state 无变化，跳过" && exit 0
+          git commit -m "update briefing state"
+          # 先 rebase 再推 + 重试，避免和 X 监控(*/10)等并发 push 冲突
+          for i in 1 2 3; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME:-main}" \
+              && git push && echo "已回写 state" && exit 0
+            echo "push 第 $i 次冲突，5 秒后重试…"; sleep 5
+          done
+          # 三次仍失败：简报已正常发出，仅当天去重状态没存上，不算致命，不让任务标红
+          echo "::warning::state 回写失败(可能并发冲突)，简报已照常发送"
+          exit 0
