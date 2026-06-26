@@ -109,7 +109,7 @@ def generate_briefing(exclusions):
     resp = client.messages.create(
         model=MODEL,
         max_tokens=4000,
-        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 8}],
+        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 6}],
         messages=[{"role": "user", "content": build_prompt(exclusions)}],
     )
     parts = [b.text for b in resp.content if getattr(b, "type", None) == "text"]
