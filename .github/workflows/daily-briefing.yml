@@ -1,15 +1,10 @@
 name: Daily AI Infra Briefing
 
 on:
-  schedule:
-    # GitHub 的 cron 用 UTC 时间。22:13 UTC = 北京时间次日 06:13。
-    # 设早留缓冲（确保 8:00 前发出）；用 :13 这种非整十分钟，避开 X 监控 */10 的并发 push。
-    # 若你不在东八区，改下面这行（和脚本里的 hours=8）。
-    - cron: "13 22 * * *"
-  workflow_dispatch: {}   # 允许在 GitHub 网页上手动点一次测试
+  workflow_dispatch: {}
 
 permissions:
-  contents: write   # 允许把更新后的 briefing_state.json 提交回仓库
+  contents: write
 
 jobs:
   send-briefing:
@@ -28,7 +23,6 @@ jobs:
 
       - name: Generate and post briefing
         env:
-          # 脚本里的环境变量名不变；右边的 secret 名用独立的，避免覆盖你已有的 DISCORD_WEBHOOK_URL
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DISCORD_WEBHOOK_URL: ${{ secrets.BRIEFING_WEBHOOK_URL }}
         run: python generate_and_post.py
@@ -38,15 +32,12 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
           git add briefing_state.json
-          # 没变化就直接退出
           git diff --staged --quiet && echo "state 无变化，跳过" && exit 0
           git commit -m "update briefing state"
-          # 先 rebase 再推 + 重试，避免和 X 监控(*/10)等并发 push 冲突
           for i in 1 2 3; do
             git pull --rebase --autostash origin "${GITHUB_REF_NAME:-main}" \
               && git push && echo "已回写 state" && exit 0
             echo "push 第 $i 次冲突，5 秒后重试…"; sleep 5
           done
-          # 三次仍失败：简报已正常发出，仅当天去重状态没存上，不算致命，不让任务标红
-          echo "::warning::state 回写失败(可能并发冲突)，简报已照常发送"
+          echo "::warning::state 回写失败，简报已照常发送"
           exit 0
