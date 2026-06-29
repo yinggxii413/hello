@@ -109,7 +109,7 @@ def generate_briefing(exclusions):
     resp = client.messages.create(
         model=MODEL,
         max_tokens=4000,
-        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 6}],
+        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}],
         messages=[{"role": "user", "content": build_prompt(exclusions)}],
     )
     parts = [b.text for b in resp.content if getattr(b, "type", None) == "text"]
@@ -174,6 +174,15 @@ def main():
             sys.exit(f"ERROR: 缺少环境变量 {key}")
 
     state = load_state()
+
+    # 幂等保护：今天已经成功发过就直接退出，避免多个触发点重复发送/重复扣费。
+    # 想强制重发，给运行设环境变量 FORCE_SEND=1 即可。
+    entries = state.get("entries", [])
+    last = entries[-1] if entries else None
+    if (not os.environ.get("FORCE_SEND")) and last and last.get("date") == TODAY_KEY and last.get("titles"):
+        print(f"今天（{TODAY_KEY}）已发送过，跳过本次运行（未调用 API、未重复发送）。")
+        return
+
     exclusions = recent_titles(state)
     print(f"加载到 {len(exclusions)} 条最近已发标题，将避免重复。")
 
