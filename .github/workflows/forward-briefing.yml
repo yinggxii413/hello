@@ -1,0 +1,24 @@
+name: Forward Briefing to Discord
+
+on:
+  push:
+    paths:
+      - "latest_briefing.md"
+  workflow_dispatch: {}
+
+jobs:
+  forward:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Forward to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.BRIEFING_WEBHOOK_URL }}
+        run: python forward_to_discord.py
