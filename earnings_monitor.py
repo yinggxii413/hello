@@ -187,7 +187,7 @@ def _web_get(url):
     return r.text
 
 
-def find_transcript_url(ticker, max_pages=6):
+def find_transcript_url(ticker, max_pages=15):
     """在 Motley Fool 转录归档页里按 ticker 匹配最新转录链接。"""
     tk = ticker.lower()
     for page in range(1, max_pages + 1):
