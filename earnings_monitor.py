@@ -84,6 +84,10 @@ WATCHLIST = set(CATEGORY_BY_TICKER.keys())
 # 启动时读取各频道 webhook(缺失为空字符串)
 WEBHOOK_BY_CATEGORY = {c["name"]: os.environ.get(c["env"], "").strip() for c in CATEGORIES}
 
+# 单频道改造：财报硬数据 -> WEBHOOK_EARNINGS；电话会摘要 -> WEBHOOK_CALLS
+WEBHOOK_EARNINGS = os.environ.get("WEBHOOK_EARNINGS", "").strip()
+WEBHOOK_CALLS = os.environ.get("WEBHOOK_CALLS", "").strip()
+
 # 电话会白名单：默认 = watchlist 里除"抓不到"的标的外的全部。
 # 排除：非美上市(韩股/日股)、ETF、封闭式基金(本就没有电话会)。
 # Motley Fool 覆盖主流美股；冷门小票若没有转录，脚本会自动跳过、不报错。
@@ -431,10 +435,10 @@ def run_post(state):
         by_cat.setdefault(cat, []).append((key, it))
 
     for cat, items in by_cat.items():
-        webhook = WEBHOOK_BY_CATEGORY.get(cat, "")
+        webhook = WEBHOOK_EARNINGS
         syms = [it.get("symbol") for _, it in items]
         if not webhook:
-            print(f"[WARN] 板块「{cat}」未配置 webhook({ENV_BY_CATEGORY.get(cat)})，跳过 {syms}(state 不记，待配置后补发)")
+            print(f"[WARN] 未配置 WEBHOOK_EARNINGS，跳过 {syms}(state 不记，待配置后补发)")
             continue
         print(f"[INFO] 板块「{cat}」→ {len(items)} 家：{syms}")
         discord_send(webhook, f"🔔 **{cat} · 财报实际结果 · {today.isoformat()}**\n"
@@ -462,8 +466,7 @@ def run_post(state):
         ckey = f"call-{sym}-{it.get('year')}Q{it.get('quarter')}"
         if state.get(ckey):
             continue
-        cat = CATEGORY_BY_TICKER.get(sym)
-        webhook = WEBHOOK_BY_CATEGORY.get(cat, "")
+        webhook = WEBHOOK_CALLS
         if not webhook:
             continue
         tx, src = fetch_transcript(sym)
@@ -493,7 +496,7 @@ def run_preview(state):
         if state.get(key):
             continue
         cat = CATEGORY_BY_TICKER.get(sym)
-        webhook = WEBHOOK_BY_CATEGORY.get(cat, "")
+        webhook = WEBHOOK_EARNINGS
         if not webhook:
             print(f"[WARN] 板块「{cat}」未配置 webhook，跳过前瞻 {sym}")
             continue
