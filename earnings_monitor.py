@@ -187,9 +187,30 @@ def _web_get(url):
     return r.text
 
 
-def find_transcript_url(ticker, max_pages=15):
-    """在 Motley Fool 转录归档页里按 ticker 匹配最新转录链接。"""
+_NAME_STOP = {"inc", "corp", "corporation", "co", "company", "ltd", "plc",
+              "holdings", "holding", "group", "technologies", "technology",
+              "the", "international", "systems", "semiconductor", "semiconductors",
+              "limited", "sa", "nv", "ag", "class"}
+_GENERIC_FIRST = {"advanced", "american", "international", "global", "united",
+                  "general", "national", "first", "new", "pacific", "standard"}
+
+def _name_slugs(company_name):
+    """由公司名生成用于匹配 Motley Fool 链接 slug 的候选词。"""
+    if not company_name:
+        return []
+    words = [w for w in re.findall(r"[a-z0-9]+", company_name.lower())
+             if w not in _NAME_STOP]
+    if not words:
+        return []
+    cands = ["-".join(words)]
+    if words[0] not in _GENERIC_FIRST and len(words[0]) >= 3:
+        cands.append(words[0])
+    return cands
+
+def find_transcript_url(ticker, company_name=None, max_pages=15):
+    """在 Motley Fool 转录归档页里，按股票代码 + 公司名匹配最新转录链接。"""
     tk = ticker.lower()
+    name_cands = _name_slugs(company_name)
     for page in range(1, max_pages + 1):
         url = FOOL_ARCHIVE + ("/" if page == 1 else f"/page/{page}/")
         html = _web_get(url)
@@ -200,15 +221,26 @@ def find_transcript_url(ticker, max_pages=15):
             html)
         for link in links:
             slug = link.rstrip("/").rsplit("/", 1)[-1]
-            # ticker 以 -mu- 或 开头-mu 形式出现在 slug
-            if re.search(rf'(^|-){re.escape(tk)}(-|$)', slug):
+            # 先按股票代码匹配（slug 里出现 -mu- 之类）
+            hit = re.search(rf'(^|-){re.escape(tk)}(-|$)', slug) is not None
+            # 代码没命中时，再按公司名匹配（如 micron-technology）
+            if not hit:
+                for c in name_cands:
+                    if "-" in c:
+                        matched = c in slug
+                    else:
+                        matched = re.search(rf'(^|-){re.escape(c)}(-|$)', slug) is not None
+                    if matched:
+                        hit = True
+                        break
+            if hit:
                 return link if link.startswith("http") else "https://www.fool.com" + link
     return None
 
 
-def fetch_transcript(ticker):
+def fetch_transcript(ticker, company_name=None):
     """返回(转录正文, 来源URL)；找不到返回(None, None)。"""
-    url = find_transcript_url(ticker)
+    url = find_transcript_url(ticker, company_name)
     if not url:
         print(f"[INFO] {ticker}: 归档页未找到转录链接")
         return None, None
@@ -469,11 +501,11 @@ def run_post(state):
         webhook = WEBHOOK_CALLS
         if not webhook:
             continue
-        tx, src = fetch_transcript(sym)
+        name = fetch_company_name(sym)
+        tx, src = fetch_transcript(sym, name)
         if not tx:
             print(f"[INFO] {sym}: 转录暂未发布，待下一班重试")
             continue  # 不标记 ckey → 下轮再试
-        name = fetch_company_name(sym)
         summary = gen_call_summary(it, name, tx)
         if summary:
             if src:
