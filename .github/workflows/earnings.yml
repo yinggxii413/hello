@@ -33,6 +33,7 @@ jobs:
           # 单频道：财报硬数据 -> WEBHOOK_EARNINGS；电话会摘要 -> WEBHOOK_CALLS
           WEBHOOK_EARNINGS: ${{ secrets.WEBHOOK_EARNINGS }}
           WEBHOOK_CALLS: ${{ secrets.WEBHOOK_CALLS }}
+          ALPHAVANTAGE_KEY: ${{ secrets.ALPHAVANTAGE_KEY }}
           REPORTED_LOOKBACK: ${{ github.event.inputs.lookback || '3' }}
         run: python earnings_monitor.py
 
