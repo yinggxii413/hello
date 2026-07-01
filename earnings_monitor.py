@@ -238,15 +238,70 @@ def find_transcript_url(ticker, company_name=None, max_pages=15):
     return None
 
 
-def fetch_transcript(ticker, company_name=None):
+def fetch_transcript_av(symbol, year=None, quarter=None, report_date=None):
+    """Alpha Vantage 兜底：按财季取电话会转录。返回(正文, 来源URL)或(None, None)。"""
+    key = os.environ.get("ALPHAVANTAGE_KEY", "").strip()
+    if not key:
+        return None, None
+    cands = []
+    if year and quarter:
+        cands.append(f"{year}Q{quarter}")
+    if report_date:
+        try:
+            y, m, _d = str(report_date).split("-")
+            cq = (int(m) - 1) // 3 + 1
+            cands.append(f"{int(y)}Q{cq}")
+        except Exception:
+            pass
+    seen = set()
+    cands = [c for c in cands if not (c in seen or seen.add(c))]
+    for q in cands[:2]:
+        try:
+            r = requests.get("https://www.alphavantage.co/query", params={
+                "function": "EARNINGS_CALL_TRANSCRIPT",
+                "symbol": symbol, "quarter": q, "apikey": key,
+            }, timeout=HTTP_TIMEOUT)
+        except Exception as e:
+            print(f"[WARN] AlphaVantage 异常 {symbol} {q}: {e}")
+            continue
+        if r.status_code != 200:
+            print(f"[WARN] AlphaVantage HTTP {r.status_code} {symbol} {q}")
+            continue
+        try:
+            data = r.json()
+        except Exception:
+            continue
+        segs = data.get("transcript") if isinstance(data, dict) else None
+        if not segs:
+            note = ""
+            if isinstance(data, dict):
+                note = data.get("Information") or data.get("Note") or data.get("Error Message") or ""
+            print(f"[INFO] AlphaVantage 无转录 {symbol} {q}: {str(note)[:100]}")
+            continue
+        parts = []
+        for s in segs:
+            who = (s.get("speaker") or "").strip()
+            title = (s.get("title") or "").strip()
+            content = (s.get("content") or "").strip()
+            if content:
+                head = f"{who} ({title}): " if who else ""
+                parts.append(head + content)
+        text = "\n".join(parts).strip()
+        if text:
+            src = f"https://www.alphavantage.co/query (EARNINGS_CALL_TRANSCRIPT {symbol} {q})"
+            return text[:16000], src
+    return None, None
+
+
+def fetch_transcript(ticker, company_name=None, year=None, quarter=None, report_date=None):
     """返回(转录正文, 来源URL)；找不到返回(None, None)。"""
     url = find_transcript_url(ticker, company_name)
     if not url:
-        print(f"[INFO] {ticker}: 归档页未找到转录链接")
-        return None, None
+        print(f"[INFO] {ticker}: Motley Fool 无转录，尝试 Alpha Vantage 兜底")
+        return fetch_transcript_av(ticker, year, quarter, report_date)
     html = _web_get(url)
     if not html:
-        return None, url
+        return fetch_transcript_av(ticker, year, quarter, report_date)
     # 去脚本/样式，剥标签，压空白
     body = re.sub(r'(?is)<(script|style|noscript)[^>]*>.*?</\1>', ' ', html)
     text = re.sub(r'(?s)<[^>]+>', ' ', body)
@@ -502,7 +557,7 @@ def run_post(state):
         if not webhook:
             continue
         name = fetch_company_name(sym)
-        tx, src = fetch_transcript(sym, name)
+        tx, src = fetch_transcript(sym, name, it.get("year"), it.get("quarter"), it.get("date"))
         if not tx:
             print(f"[INFO] {sym}: 转录暂未发布，待下一班重试")
             continue  # 不标记 ckey → 下轮再试
