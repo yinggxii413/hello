@@ -2,9 +2,7 @@ name: Earnings Monitor
 
 on:
   schedule:
-    - cron: "30 12 * * *"   # UTC 12:30 = 北京 20:30 (覆盖美股盘前)
-    - cron: "30 20 * * *"   # UTC 20:30 = 北京 04:30 (覆盖美股盘后)
-    - cron: "30 22 * * *"   # UTC 22:30 = 北京 06:30 (覆盖美股盘后晚批)
+    - cron: "30 22 * * *"   # UTC 22:30 = 北京 06:30 (每天一次)
   workflow_dispatch:
 
 permissions:
@@ -27,16 +25,9 @@ jobs:
         env:
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          # 9 个板块频道的 Webhook（缺哪个该板块就跳过，不影响其他）
-          WEBHOOK_EQUIP:    ${{ secrets.WEBHOOK_EQUIP }}      # 1-封装设备
-          WEBHOOK_STORAGE:  ${{ secrets.WEBHOOK_STORAGE }}    # 2-存储
-          WEBHOOK_COMPUTE:  ${{ secrets.WEBHOOK_COMPUTE }}    # 3-算力芯片
-          WEBHOOK_OPTICAL:  ${{ secrets.WEBHOOK_OPTICAL }}    # 4-光模块
-          WEBHOOK_NEOCLOUD: ${{ secrets.WEBHOOK_NEOCLOUD }}   # 5-Neocloud
-          WEBHOOK_MAG7:     ${{ secrets.WEBHOOK_MAG7 }}       # 6-Mag 7
-          WEBHOOK_SPACE:    ${{ secrets.WEBHOOK_SPACE }}      # 7-航天机器人
-          WEBHOOK_ENERGY:   ${{ secrets.WEBHOOK_ENERGY }}     # 8-储能
-          WEBHOOK_QUANTUM:  ${{ secrets.WEBHOOK_QUANTUM }}    # 9-量子
+          # 单频道：财报硬数据 -> WEBHOOK_EARNINGS；电话会摘要 -> WEBHOOK_CALLS
+          WEBHOOK_EARNINGS: ${{ secrets.WEBHOOK_EARNINGS }}
+          WEBHOOK_CALLS: ${{ secrets.WEBHOOK_CALLS }}
         run: python earnings_monitor.py
 
       - name: Save earnings state
