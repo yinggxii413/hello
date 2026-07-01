@@ -1,6 +1,8 @@
 name: Daily AI Infra Briefing
 
 on:
+  schedule:
+    - cron: "13 22 * * *"
   workflow_dispatch: {}
 
 permissions:
