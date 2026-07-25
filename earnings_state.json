@@ -12,5 +12,9 @@
 "post-GOOGL-2026Q2": true,
 "post-TSLA-2026Q2": true,
 "post-INTC-2026Q2": true,
-"post-NEE-2026Q2": true
+"post-NEE-2026Q2": true,
+"call-NEE-2026Q2": true,
+"call-INTC-2026Q2": true,
+"call-GOOGL-2026Q2": true,
+"call-TSLA-2026Q2": true
 }
