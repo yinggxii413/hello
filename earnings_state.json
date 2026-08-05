@@ -39,5 +39,13 @@
 "call-AXTI-2026Q2": true,
 "post-ALAB-2026Q2": true,
 "post-AMD-2026Q2": true,
-"post-SPCX-2026Q2": true
+"post-SPCX-2026Q2": true,
+"post-EOSE-2026Q2": true,
+"post-FLNC-2026Q3": true,
+"post-IONQ-2026Q2": true,
+"post-SNDK-2026Q4": true,
+"post-WDC-2026Q4": true,
+"post-VSH-2026Q2": true,
+"post-WULF-2026Q2": true,
+"call-ALAB-2026Q2": true
 }
