@@ -51,5 +51,13 @@
 "post-AAOI-2026Q2": true,
 "post-CEG-2026Q2": true,
 "post-ONTO-2026Q2": true,
-"post-QBTS-2026Q2": true
+"post-QBTS-2026Q2": true,
+"call-CEG-2026Q2": true,
+"call-QBTS-2026Q2": true,
+"call-EOSE-2026Q2": true,
+"call-IONQ-2026Q2": true,
+"call-SNDK-2026Q4": true,
+"call-VSH-2026Q2": true,
+"call-WDC-2026Q4": true,
+"call-WULF-2026Q2": true
 }
