@@ -67,5 +67,12 @@
 "post-QUBT-2026Q2": true,
 "post-CRWV-2026Q2": true,
 "post-FLY-2026Q2": true,
-"post-LITE-2026Q4": true
+"post-LITE-2026Q4": true,
+"post-COHR-2026Q4": true,
+"post-NBIS-2026Q2": true,
+"call-CRWV-2026Q2": true,
+"call-FLY-2026Q2": true,
+"call-ASTS-2026Q2": true,
+"call-CAMT-2026Q2": true,
+"call-RKLB-2026Q2": true
 }
