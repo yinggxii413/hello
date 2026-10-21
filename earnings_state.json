@@ -97,5 +97,7 @@
 "post-ORCL-2027Q1": true,
 "call-ORCL-2027Q1": true,
 "post-MU-2026Q4": true,
-"call-MU-2026Q4": true
+"call-MU-2026Q4": true,
+"post-SPCX-2026Q3": true,
+"call-SPCX-2026Q3": true
 }
